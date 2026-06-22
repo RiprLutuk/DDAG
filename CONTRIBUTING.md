@@ -1,0 +1,66 @@
+# Contributing to DDAG
+
+Thanks for your interest in DDAG! Contributions of all kinds are welcome —
+bug reports, docs, features, and especially **integration testing for the
+MySQL / Oracle / SQL Server connectors** (they build and share the connector
+codebase but have not yet been exercised end-to-end against live engines).
+
+## Development setup
+
+**Prerequisites:** Go 1.26+, Node 20+, a PostgreSQL you can reach (dev default
+`localhost:1921`, user `lutuk`, trust auth), and Redis on `localhost:6379`.
+Override anything via env — see [configs/.env.example](configs/.env.example).
+
+```bash
+make build          # build all service binaries into ./bin
+make seed           # create metadata DB, migrate, seed roles + a runnable demo
+make dev            # start core services in the background
+make dashboard      # run the Nuxt dashboard on :3000  (superadmin / Admin#12345)
+```
+
+## Before you open a PR
+
+```bash
+make vet            # go vet ./...
+make test           # unit tests
+gofmt -l internal cmd   # must print nothing (run `gofmt -w` to fix)
+```
+
+For dashboard changes also run a production build to catch template errors:
+
+```bash
+cd apps/dashboard && npm install && npm run build
+```
+
+CI runs the same checks on every PR.
+
+## Guidelines
+
+- **Match the surrounding code** — comment density, naming, and idiom. Keep
+  packages small and focused; one service = one `cmd/<svc>` + `internal/<svc>`.
+- **Security is not optional.** Queries must use bound parameters (never string
+  concatenation); never log secrets; keep raw driver errors out of client
+  responses. New endpoints must enforce authorization in the backend, not just
+  the UI.
+- **Add tests** for pure logic (binders, validation, policy). See
+  `internal/{connectors,policy,gateway}/*_test.go` for the style.
+- Keep commits focused and write a clear message describing the *why*.
+
+## Good first issues / help wanted
+
+- Live integration tests for `connector-mysql`, `connector-oracle`,
+  `connector-sqlserver` (a docker-compose with sample source DBs would be great).
+- Approval workflow for API publishing (PRD §7.2).
+- Embedded Swagger UI page in the dashboard rendering the exported OpenAPI spec.
+- Additional Grafana panels / alerting rules.
+
+## Reporting bugs
+
+Open an issue with steps to reproduce, expected vs. actual behavior, and the
+relevant structured log lines (grep by `request_id` to trace across services).
+Please redact any secrets.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the
+[MIT License](LICENSE).

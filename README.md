@@ -1,5 +1,12 @@
 # DDAG — Dynamic Database API Gateway
 
+[![CI](https://github.com/RiprLutuk/DDAG/actions/workflows/ci.yml/badge.svg)](https://github.com/RiprLutuk/DDAG/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Nuxt 3](https://img.shields.io/badge/Nuxt-3-00DC82?logo=nuxtdotjs&logoColor=white)](apps/dashboard)
+[![Release](https://img.shields.io/github/v/release/RiprLutuk/DDAG)](https://github.com/RiprLutuk/DDAG/releases/latest)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 Backend-as-a-Service that turns SQL queries against many database engines into
 secured, observable, cached REST APIs — built and managed entirely from an admin
 dashboard, with **no per-API deployment**.
@@ -192,3 +199,15 @@ Open questions and post-MVP items are tracked against the [PRD](PRD.md).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — services, data flow, internals
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — deploy, configure, run, troubleshoot
 - [PRD.md](PRD.md) — the product requirements this implements
+
+---
+
+## Contributing
+
+Contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Areas
+that especially need help: live integration testing for the MySQL / Oracle /
+SQL Server connectors, an embedded Swagger UI page, and more Grafana panels.
+
+## License
+
+[MIT](LICENSE) © Ripr Lutuk
