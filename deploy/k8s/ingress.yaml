@@ -1,0 +1,32 @@
+# Routes the dashboard, admin API and public gateway under one host.
+# Connector services are intentionally NOT exposed (PRD §13.3).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ddag
+  namespace: ddag
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+    - hosts: [ ddag.example.com ]
+      secretName: ddag-tls
+  rules:
+    - host: ddag.example.com
+      http:
+        paths:
+          - path: /admin
+            pathType: Prefix
+            backend: { service: { name: admin-backend, port: { number: 8080 } } }
+          - path: /oauth
+            pathType: Prefix
+            backend: { service: { name: auth-service, port: { number: 8081 } } }
+          - path: /.well-known
+            pathType: Prefix
+            backend: { service: { name: auth-service, port: { number: 8081 } } }
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: api-gateway, port: { number: 8082 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: dashboard, port: { number: 3000 } } }

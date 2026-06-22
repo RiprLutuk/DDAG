@@ -1,0 +1,100 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-backend
+  namespace: ddag
+  labels: { app: admin-backend }
+spec:
+  selector: { app: admin-backend }
+  ports: [ { name: http, port: 8080, targetPort: 8080 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: ddag
+  labels: { app: auth-service }
+spec:
+  selector: { app: auth-service }
+  ports: [ { name: http, port: 8081, targetPort: 8081 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: ddag
+  labels: { app: api-gateway }
+spec:
+  selector: { app: api-gateway }
+  ports: [ { name: http, port: 8082, targetPort: 8082 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: policy-engine
+  namespace: ddag
+  labels: { app: policy-engine }
+spec:
+  selector: { app: policy-engine }
+  ports: [ { name: http, port: 8083, targetPort: 8083 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cache-service
+  namespace: ddag
+  labels: { app: cache-service }
+spec:
+  selector: { app: cache-service }
+  ports: [ { name: http, port: 8084, targetPort: 8084 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker
+  namespace: ddag
+  labels: { app: worker }
+spec:
+  selector: { app: worker }
+  ports: [ { name: http, port: 8085, targetPort: 8085 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: connector-postgres
+  namespace: ddag
+  labels: { app: connector-postgres }
+spec:
+  selector: { app: connector-postgres }
+  ports: [ { name: http, port: 8090, targetPort: 8090 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: connector-mysql
+  namespace: ddag
+  labels: { app: connector-mysql }
+spec:
+  selector: { app: connector-mysql }
+  ports: [ { name: http, port: 8091, targetPort: 8091 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: connector-oracle
+  namespace: ddag
+  labels: { app: connector-oracle }
+spec:
+  selector: { app: connector-oracle }
+  ports: [ { name: http, port: 8092, targetPort: 8092 } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: connector-sqlserver
+  namespace: ddag
+  labels: { app: connector-sqlserver }
+spec:
+  selector: { app: connector-sqlserver }
+  ports: [ { name: http, port: 8093, targetPort: 8093 } ]

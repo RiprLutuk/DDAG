@@ -1,0 +1,168 @@
+# DDAG full stack for local/staging. Per the product principle, internal
+# databases (metadata PostgreSQL + source DBs) are NOT containerized here — they
+# are reached from outside via DDAG_DB_HOST (default host.docker.internal). Only
+# Redis and the monitoring stack run as containers.
+#
+#   docker compose up -d --build
+#   # first run, seed metadata + demo data:
+#   docker compose run --rm migrate --demo
+#
+# Each Go service is built from the shared multi-stage Dockerfile via SERVICE arg.
+
+x-common-env: &common-env
+  DDAG_ENV: ${DDAG_ENV:-dev}
+  DDAG_LOG_LEVEL: ${DDAG_LOG_LEVEL:-info}
+  DDAG_DB_HOST: ${DDAG_DB_HOST:-host.docker.internal}
+  DDAG_DB_PORT: ${DDAG_DB_PORT:-1921}
+  DDAG_DB_USER: ${DDAG_DB_USER:-lutuk}
+  DDAG_DB_PASSWORD: ${DDAG_DB_PASSWORD:-}
+  DDAG_DB_NAME: ${DDAG_DB_NAME:-ddag}
+  DDAG_DB_SSLMODE: ${DDAG_DB_SSLMODE:-disable}
+  DDAG_REDIS_ADDR: redis:6379
+  DDAG_MASTER_KEY: ${DDAG_MASTER_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+  DDAG_TOKEN_ISSUER: ${DDAG_TOKEN_ISSUER:-https://ddag.local}
+  DDAG_JWKS_URL: http://auth-service:8081/.well-known/jwks.json
+  DDAG_CONNECTOR_POSTGRES_URL: http://connector-postgres:8090
+  DDAG_CONNECTOR_MYSQL_URL: http://connector-mysql:8091
+  DDAG_CONNECTOR_ORACLE_URL: http://connector-oracle:8092
+  DDAG_CONNECTOR_SQLSERVER_URL: http://connector-sqlserver:8093
+
+x-go-build: &go-build
+  build:
+    context: .
+    dockerfile: deploy/docker/Dockerfile
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # One-shot: apply migrations + seed (run with `--demo` for demo data).
+  migrate:
+    <<: *go-build
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args: { SERVICE: migrate }
+    environment: *common-env
+    entrypoint: ["/usr/local/bin/ddag-service"]
+    profiles: ["tools"]
+    restart: "no"
+
+  admin-backend:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: admin-backend } }
+    environment:
+      <<: *common-env
+      DDAG_DASHBOARD_ORIGINS: ${DDAG_DASHBOARD_ORIGINS:-http://localhost:3000}
+      DDAG_SESSION_SECRET: ${DDAG_SESSION_SECRET:-dev-insecure-session-secret-change-me}
+    ports: ["8080:8080"]
+
+  auth-service:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: auth-service } }
+    environment: *common-env
+    ports: ["8081:8081"]
+
+  api-gateway:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: api-gateway } }
+    environment:
+      <<: *common-env
+      DDAG_POLICY_MODE: ${DDAG_POLICY_MODE:-inprocess}
+      DDAG_CACHE_MODE: ${DDAG_CACHE_MODE:-inprocess}
+    ports: ["8082:8082"]
+    depends_on:
+      redis: { condition: service_healthy }
+      auth-service: { condition: service_started }
+
+  policy-engine:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: policy-engine } }
+    environment: *common-env
+    ports: ["8083:8083"]
+
+  cache-service:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: cache-service } }
+    environment: *common-env
+    ports: ["8084:8084"]
+
+  worker:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: worker } }
+    environment: *common-env
+    ports: ["8085:8085"]
+
+  connector-postgres:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-postgres } }
+    environment: *common-env
+    ports: ["8090:8090"]
+
+  connector-mysql:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-mysql } }
+    environment: *common-env
+    ports: ["8091:8091"]
+
+  connector-oracle:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-oracle } }
+    environment: *common-env
+    ports: ["8092:8092"]
+
+  connector-sqlserver:
+    <<: *go-build
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-sqlserver } }
+    environment: *common-env
+    ports: ["8093:8093"]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dashboard
+    environment:
+      NUXT_PUBLIC_API_BASE: ${DDAG_PUBLIC_API_BASE:-http://localhost:8080}
+    ports: ["3000:3000"]
+    depends_on:
+      admin-backend: { condition: service_started }
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  grafana-data:

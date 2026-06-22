@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ddag
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - redis.yaml
+  - deployments.yaml
+  - services.yaml
+  - dashboard.yaml
+  - hpa.yaml
+  - ingress.yaml
+  - servicemonitor.yaml

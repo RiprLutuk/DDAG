@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: ddag
+  labels: { app: dashboard }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: dashboard } }
+  template:
+    metadata: { labels: { app: dashboard } }
+    spec:
+      containers:
+        - name: dashboard
+          image: ddag-dashboard:latest
+          ports: [ { containerPort: 3000 } ]
+          env:
+            - name: NUXT_PUBLIC_API_BASE
+              value: "https://ddag.example.com/admin"
+          resources:
+            requests: { cpu: "50m", memory: "96Mi" }
+            limits: { cpu: "300m", memory: "256Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: ddag
+spec:
+  selector: { app: dashboard }
+  ports: [ { port: 3000, targetPort: 3000 } ]

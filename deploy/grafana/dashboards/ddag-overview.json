@@ -1,0 +1,92 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "title": "DDAG Overview",
+  "uid": "ddag-overview",
+  "tags": ["ddag"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Request rate by service (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum by (service) (rate(ddag_http_requests_total[1m]))", "legendFormat": "{{service}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 latency by service (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, service) (rate(ddag_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate (5xx, req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum by (service) (rate(ddag_http_requests_total{status=~\"5..\"}[1m]))", "legendFormat": "{{service}}" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Cache hit ratio",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        { "expr": "sum(rate(ddag_cache_hits_total[5m])) / clamp_min(sum(rate(ddag_cache_hits_total[5m])) + sum(rate(ddag_cache_misses_total[5m])), 1)" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens issued vs failed (req/s)",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(ddag_token_issued_total[1m]))", "legendFormat": "issued" },
+        { "expr": "sum(rate(ddag_token_failed_total[1m]))", "legendFormat": "failed" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Source DB query p95 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, connection) (rate(ddag_db_query_duration_seconds_bucket[5m])))", "legendFormat": "{{connection}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Connection pool usage",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "ddag_pool_in_use_connections", "legendFormat": "{{connection}} in-use" },
+        { "expr": "ddag_pool_max_connections", "legendFormat": "{{connection}} max" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Security events (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "sum(rate(ddag_unauthorized_total[1m]))", "legendFormat": "401 unauthorized" },
+        { "expr": "sum(rate(ddag_forbidden_total[1m]))", "legendFormat": "403 forbidden" },
+        { "expr": "sum(rate(ddag_rate_limited_total[1m]))", "legendFormat": "429 rate-limited" },
+        { "expr": "sum(rate(ddag_ip_blocked_total[1m]))", "legendFormat": "ip blocked" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Connector errors (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "expr": "sum by (db_type) (rate(ddag_connector_errors_total[1m]))", "legendFormat": "{{db_type}}" }
+      ]
+    }
+  ]
+}

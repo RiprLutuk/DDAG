@@ -1,0 +1,15 @@
+# Prometheus Operator ServiceMonitor (if using kube-prometheus-stack).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ddag
+  namespace: ddag
+  labels: { release: prometheus }
+spec:
+  namespaceSelector: { matchNames: [ ddag ] }
+  selector:
+    matchLabels: { app.kubernetes.io/part-of: ddag }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
