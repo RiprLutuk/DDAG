@@ -7,9 +7,9 @@ codebase but have not yet been exercised end-to-end against live engines).
 
 ## Development setup
 
-**Prerequisites:** Go 1.26+, Node 20+, a PostgreSQL you can reach (dev default
-`localhost:1921`, user `lutuk`, trust auth), and Redis on `localhost:6379`.
-Override anything via env — see [configs/.env.example](configs/.env.example).
+**Prerequisites:** Go 1.26+, Node 20+, a reachable PostgreSQL instance and Redis.
+All connection settings are configured via environment variables — copy
+[configs/.env.example](configs/.env.example) and adjust for your setup.
 
 ```bash
 make build          # build all service binaries into ./bin

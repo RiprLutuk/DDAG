@@ -1,6 +1,5 @@
 # DDAG — Dynamic Database API Gateway
 
-[![CI](https://github.com/RiprLutuk/DDAG/actions/workflows/ci.yml/badge.svg)](https://github.com/RiprLutuk/DDAG/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Nuxt 3](https://img.shields.io/badge/Nuxt-3-00DC82?logo=nuxtdotjs&logoColor=white)](apps/dashboard)
@@ -84,9 +83,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detail.
 
 ## Quick start (local)
 
-**Prerequisites:** Go 1.26+, Node 20+, an external PostgreSQL (the dev default
-expects it on `localhost:1921`, user `lutuk`, trust auth), and Redis on
-`localhost:6379`. Override via env (see [configs/.env.example](configs/.env.example)).
+**Prerequisites:** Go 1.26+, Node 20+, a reachable **PostgreSQL** instance (used
+as the metadata store) and **Redis**. All connection details — host, port,
+credentials, SSL, and pool sizes — are configured through environment variables;
+copy [configs/.env.example](configs/.env.example) and adjust for your
+environment.
 
 ```bash
 # 1. Build all service binaries
