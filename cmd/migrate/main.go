@@ -24,7 +24,12 @@ func main() {
 	flag.Parse()
 
 	cfg := config.Load("migrate")
+	if err := cfg.Validate(); err != nil {
+		logging.New("migrate", cfg.LogLevel).Error("invalid_config", "error", err.Error())
+		os.Exit(1)
+	}
 	log := logging.New("migrate", cfg.LogLevel)
+	cfg.LogWarnings(log)
 	ctx := context.Background()
 
 	pool, err := db.Connect(ctx, cfg.Metadata)

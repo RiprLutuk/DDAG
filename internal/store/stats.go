@@ -27,6 +27,7 @@ type EndpointStat struct {
 
 // ConnectorStat is a source-DB health summary.
 type ConnectorStat struct {
+	ID           string `json:"id" db:"id"`
 	Name         string `json:"name" db:"name"`
 	DatabaseType string `json:"database_type" db:"database_type"`
 	Status       string `json:"status" db:"status"`
@@ -70,7 +71,7 @@ func (s *Store) Overview(ctx context.Context) (*Overview, error) {
 
 	var conns []ConnectorStat
 	if err := s.selectRows(ctx, &conns, `
-		SELECT name, database_type, status, last_health_status AS health_status
+		SELECT id::text, name, database_type, status, last_health_status AS health_status
 		FROM database_connections ORDER BY name`); err != nil {
 		return nil, err
 	}

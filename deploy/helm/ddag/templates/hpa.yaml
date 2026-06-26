@@ -1,0 +1,27 @@
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "ddag.namespace" $ }}
+  labels:
+    app: {{ $name }}
+    {{- include "ddag.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ default 1 $svc.hpa.minReplicas }}
+  maxReplicas: {{ default 8 $svc.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ default 70 $svc.hpa.cpu }}
+{{- end }}
+{{- end }}

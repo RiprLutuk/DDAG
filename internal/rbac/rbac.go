@@ -30,6 +30,7 @@ const (
 	PurgeCache        = "purge_cache"
 	ViewAudit         = "view_audit"
 	ViewMonitoring    = "view_monitoring"
+	ViewCircuitState  = "view_circuit_state"
 	ManageRateLimit   = "manage_rate_limit"
 	ManageIPWhitelist = "manage_ip_whitelist"
 )
@@ -63,6 +64,7 @@ var AllPermissions = []struct{ Code, Description string }{
 	{PurgeCache, "Purge endpoint cache"},
 	{ViewAudit, "View audit logs"},
 	{ViewMonitoring, "View monitoring dashboards"},
+	{ViewCircuitState, "View circuit breaker state"},
 	{ManageRateLimit, "Manage rate-limit rules"},
 	{ManageIPWhitelist, "Manage IP whitelist rules"},
 }
@@ -73,16 +75,16 @@ var DefaultRolePermissions = map[string][]string{
 	RolePlatformAdmin: {
 		ViewDashboard, ManageClient, ManageScope, CreateAPI, EditAPI, ApproveAPI,
 		PublishAPI, DisableAPI, PurgeCache, ManageRateLimit, ManageIPWhitelist,
-		ViewMonitoring, ViewAudit, TestConnection,
+		ViewMonitoring, ViewCircuitState, ViewAudit, TestConnection,
 	},
 	RoleDBA: {
 		ViewDashboard, ManageConnection, ViewDBSecret, TestConnection, CreateAPI,
-		EditAPI, ApproveAPI, ViewMonitoring,
+		EditAPI, ApproveAPI, ViewMonitoring, ViewCircuitState,
 	},
 	RoleAppAdmin:  {ViewDashboard, ViewMonitoring},
 	RoleDeveloper: {ViewDashboard},
-	RoleViewer:    {ViewDashboard, ViewMonitoring, ViewAudit},
-	RoleAuditor:   {ViewDashboard, ViewAudit, ViewMonitoring},
+	RoleViewer:    {ViewDashboard, ViewMonitoring, ViewCircuitState, ViewAudit},
+	RoleAuditor:   {ViewDashboard, ViewAudit, ViewMonitoring, ViewCircuitState},
 }
 
 // RoleDescriptions describes each system role.

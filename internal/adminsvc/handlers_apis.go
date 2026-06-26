@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/ddag/ddag/internal/gateway"
 	"github.com/ddag/ddag/internal/httpx"
+	"github.com/ddag/ddag/internal/internalauth"
 	"github.com/ddag/ddag/internal/models"
 	"github.com/google/uuid"
 )
@@ -83,6 +85,7 @@ func (s *service) createAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.ReplaceAPIParameters(r.Context(), id, in.Parameters)
+	s.publishMetadataSync(r.Context(), "api:create")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "create_api", "api", id.String(), map[string]any{"path": in.Path}))
 	created, _ := s.store.GetAPI(r.Context(), id)
 	httpx.Created(w, r, created)
@@ -118,6 +121,7 @@ func (s *service) updateAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.ReplaceAPIParameters(r.Context(), id, in.Parameters)
+	s.publishMetadataSync(r.Context(), "api:update")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "edit_api", "api", id.String(), nil))
 	updated, _ := s.store.GetAPI(r.Context(), id)
 	ok(w, r, updated)
@@ -132,6 +136,7 @@ func (s *service) deleteAPI(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "api:delete")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "disable_api", "api", id.String(), map[string]any{"deleted": true}))
 	ok(w, r, map[string]bool{"ok": true})
 }
@@ -156,6 +161,7 @@ func (s *service) publishAPI(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "api:publish")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "publish_api", "api", id.String(), nil))
 	updated, _ := s.store.GetAPI(r.Context(), id)
 	ok(w, r, updated)
@@ -173,6 +179,7 @@ func (s *service) setAPIStatusHandler(status, action string) http.HandlerFunc {
 			storeErr(w, r, err)
 			return
 		}
+		s.publishMetadataSync(r.Context(), "api:status:"+status)
 		s.audit.Write(r.Context(), r, s.actorEvent(r, action, "api", id.String(), nil))
 		updated, _ := s.store.GetAPI(r.Context(), id)
 		ok(w, r, updated)
@@ -227,6 +234,10 @@ func (s *service) callConnectorQuery(ctx context.Context, dbType string, payload
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(httpx.RequestIDHeader, "")
+	if s.cfg.Gateway.InternalAuthSecret != "" {
+		internalauth.SignHeaders(req, body, s.cfg.Gateway.InternalAuthSecret, time.Now())
+	}
 	resp, err := s.httpc.Do(req)
 	if err != nil {
 		return nil, err
@@ -278,6 +289,7 @@ func (s *service) setAPICache(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "cache_rule:update")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "edit_api", "cache_rule", id.String(), map[string]any{"enabled": req.Enabled}))
 	ok(w, r, cr)
 }

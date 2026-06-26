@@ -80,6 +80,7 @@ func (c *pgConnector) Query(ctx context.Context, req QueryRequest) (*QueryResult
 	if err != nil {
 		return nil, err
 	}
+	sql, args = ApplyPagination(sql, args, c.cfg.DatabaseType, req.Limit, req.Offset)
 	qctx, cancel := context.WithTimeout(ctx, queryTO(c.cfg, req.TimeoutMS))
 	defer cancel()
 
@@ -98,9 +99,6 @@ func (c *pgConnector) Query(ctx context.Context, req QueryRequest) (*QueryResult
 
 	out := make([]map[string]any, 0, 16)
 	for rows.Next() {
-		if req.Limit > 0 && len(out) >= req.Limit {
-			break
-		}
 		vals, err := rows.Values()
 		if err != nil {
 			return nil, err

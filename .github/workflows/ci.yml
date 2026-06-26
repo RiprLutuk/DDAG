@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Go build, vet & test
+    name: Go build, vet, lint & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +26,67 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: --timeout=5m
+      - name: govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+      - name: gosec
+        uses: securego/gosec@master
+        with:
+          args: -exclude=G104 ./...
       - name: Test
         run: go test ./...
 
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DDAG_INTEGRATION_POSTGRES_HOST: 127.0.0.1
+      DDAG_INTEGRATION_POSTGRES_PORT: "5432"
+      DDAG_INTEGRATION_POSTGRES_USER: postgres
+      DDAG_INTEGRATION_POSTGRES_PASSWORD: postgres
+      DDAG_INTEGRATION_POSTGRES_DB: postgres
+      DDAG_INTEGRATION_REDIS_ADDR: 127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Integration tests
+        run: go test -tags=integration ./...
+
   dashboard:
-    name: Dashboard build
+    name: Dashboard audit & build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,5 +96,48 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install
+          cache: npm
+          cache-dependency-path: apps/dashboard/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
       - run: npm run build
+
+  helm:
+    name: Helm lint & render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Helm lint
+        run: helm lint deploy/helm/ddag
+      - name: Helm template profiles
+        run: |
+          helm template ddag deploy/helm/ddag >/tmp/ddag-default.yaml
+          helm template ddag deploy/helm/ddag -f deploy/helm/ddag/values-dev.yaml >/tmp/ddag-dev.yaml
+          helm template ddag deploy/helm/ddag -f deploy/helm/ddag/values-production.yaml >/tmp/ddag-production.yaml
+          helm template ddag deploy/helm/ddag -f deploy/helm/ddag/values-enterprise.yaml >/tmp/ddag-enterprise.yaml
+
+  container:
+    name: Docker build & Trivy scan
+    runs-on: ubuntu-latest
+    needs: [backend, dashboard]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build api-gateway image
+        run: docker build -f deploy/docker/Dockerfile --build-arg SERVICE=api-gateway -t ddag-api-gateway:ci .
+      - name: Build dashboard image
+        run: docker build -f deploy/docker/Dockerfile.dashboard -t ddag-dashboard:ci .
+      - name: Trivy scan api-gateway
+        uses: aquasecurity/trivy-action@0.32.0
+        with:
+          image-ref: ddag-api-gateway:ci
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      - name: Trivy scan dashboard
+        uses: aquasecurity/trivy-action@0.32.0
+        with:
+          image-ref: ddag-dashboard:ci
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"

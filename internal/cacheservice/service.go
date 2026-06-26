@@ -30,7 +30,11 @@ type service struct {
 // Run starts the cache-service and blocks.
 func Run() error {
 	cfg := config.Load("cache-service")
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	log := logging.New("cache-service", cfg.LogLevel)
+	cfg.LogWarnings(log)
 	m := metrics.New("cache-service")
 	ctx := context.Background()
 

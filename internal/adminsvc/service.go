@@ -24,6 +24,7 @@ type service struct {
 	secrets    secret.Store
 	audit      *audit.Recorder
 	cache      *cache.Cache
+	rdb        *redis.Client
 	connectors map[string]string // db_type -> connector base URL
 	httpc      *http.Client
 	log        *logging.Logger
@@ -33,7 +34,11 @@ type service struct {
 // seeds core data so the dashboard is immediately usable (idempotent).
 func Run() error {
 	cfg := config.Load("admin-backend")
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	log := logging.New("admin-backend", cfg.LogLevel)
+	cfg.LogWarnings(log)
 	m := metrics.New("admin-backend")
 	ctx := context.Background()
 
@@ -67,6 +72,7 @@ func Run() error {
 		secrets:    sec,
 		audit:      audit.New(st),
 		cache:      cache.NewWithClient(rdb),
+		rdb:        rdb,
 		connectors: cfg.Gateway.ConnectorURLs,
 		httpc:      &http.Client{Timeout: 30 * time.Second},
 		log:        log,

@@ -50,6 +50,17 @@ func (r *Router) Count() int {
 	return len(r.routes)
 }
 
+// APIs returns a snapshot of the compiled API definitions.
+func (r *Router) APIs() []models.APIDefinition {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	apis := make([]models.APIDefinition, 0, len(r.routes))
+	for _, rt := range r.routes {
+		apis = append(apis, rt.API)
+	}
+	return apis
+}
+
 // Match finds the route for a method+path, returning the route and the extracted
 // path parameters. Literal segments take priority over parameter segments.
 func (r *Router) Match(method, path string) (*Route, map[string]string, bool) {

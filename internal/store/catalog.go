@@ -29,6 +29,12 @@ func (s *Store) ListConnections(ctx context.Context, p ListParams) ([]models.Dat
 	return conns, total, err
 }
 
+func (s *Store) ListAllConnections(ctx context.Context) ([]models.DatabaseConnection, error) {
+	var conns []models.DatabaseConnection
+	err := s.selectRows(ctx, &conns, `SELECT `+connCols+` FROM database_connections ORDER BY name`)
+	return conns, err
+}
+
 func (s *Store) GetConnection(ctx context.Context, id uuid.UUID) (*models.DatabaseConnection, error) {
 	var c models.DatabaseConnection
 	err := s.get(ctx, &c, `SELECT `+connCols+` FROM database_connections WHERE id=$1`, id)

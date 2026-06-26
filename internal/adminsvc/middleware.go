@@ -12,6 +12,9 @@ import (
 
 // allowedOrigins lists dashboard origins permitted for credentialed CORS.
 func (s *service) allowedOrigins() []string {
+	if len(s.cfg.DashboardOrigins) > 0 {
+		return s.cfg.DashboardOrigins
+	}
 	if v := os.Getenv("DDAG_DASHBOARD_ORIGINS"); v != "" {
 		return strings.Split(v, ",")
 	}
@@ -33,9 +36,32 @@ func (s *service) cors(next http.Handler) http.Handler {
 			}
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-CSRF-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *service) csrf(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if _, err := r.Cookie(s.cfg.Session.CookieName); err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		csrfCookie, err := r.Cookie("ddag_csrf")
+		if err != nil || csrfCookie.Value == "" || r.Header.Get("X-CSRF-Token") != csrfCookie.Value {
+			httpx.ErrorCode(w, r, httpx.CodeForbidden, "csrf token is required")
 			return
 		}
 		next.ServeHTTP(w, r)

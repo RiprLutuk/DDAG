@@ -55,6 +55,7 @@ func (s *service) createRateLimit(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "rate_limit:create")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "change_rate_limit", "rate_limit_rule", id.String(), nil))
 	rule.ID = id
 	ok(w, r, rule)
@@ -78,6 +79,7 @@ func (s *service) updateRateLimit(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "rate_limit:update")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "change_rate_limit", "rate_limit_rule", id.String(), nil))
 	ok(w, r, rule)
 }
@@ -91,6 +93,7 @@ func (s *service) deleteRateLimit(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "rate_limit:delete")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "change_rate_limit", "rate_limit_rule", id.String(), map[string]any{"deleted": true}))
 	ok(w, r, map[string]bool{"ok": true})
 }
@@ -133,6 +136,7 @@ func (s *service) createIPWhitelist(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "ip_whitelist:create")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "change_ip_whitelist", "ip_whitelist", id.String(), map[string]any{"cidr": in.IPCIDR}))
 	entry.ID = id
 	ok(w, r, entry)
@@ -155,6 +159,7 @@ func (s *service) updateIPWhitelist(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "ip_whitelist:update")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "change_ip_whitelist", "ip_whitelist", id.String(), nil))
 	ok(w, r, entry)
 }
@@ -168,6 +173,7 @@ func (s *service) deleteIPWhitelist(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "ip_whitelist:delete")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "change_ip_whitelist", "ip_whitelist", id.String(), map[string]any{"deleted": true}))
 	ok(w, r, map[string]bool{"ok": true})
 }

@@ -20,6 +20,7 @@ func (s *service) routes() http.Handler {
 	// Authenticated.
 	r.Group(func(pr chi.Router) {
 		pr.Use(s.requireSession)
+		pr.Use(s.csrf)
 
 		pr.Post("/auth/logout", s.handleLogout)
 		pr.Get("/auth/me", s.handleMe)
@@ -103,6 +104,7 @@ func (s *service) routes() http.Handler {
 		pr.Method("DELETE", "/api/ip-whitelists/{id}", perm(rbac.ManageIPWhitelist, s.deleteIPWhitelist))
 
 		// Logs & audit.
+		pr.Method("GET", "/api/circuit-breakers", perm(rbac.ViewCircuitState, s.listCircuitBreakers))
 		pr.Method("GET", "/api/request-logs", perm(rbac.ViewMonitoring, s.listRequestLogs))
 		pr.Method("GET", "/api/audit-logs", perm(rbac.ViewAudit, s.listAuditLogs))
 

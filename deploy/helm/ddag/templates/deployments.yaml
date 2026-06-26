@@ -1,0 +1,54 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "ddag.namespace" $ }}
+  labels:
+    app: {{ $name }}
+    {{- include "ddag.labels" $ | nindent 4 }}
+spec:
+  replicas: {{ default 1 $svc.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        {{- include "ddag.labels" $ | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ $svc.port | quote }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: "{{ $svc.image.repository }}:{{ default $.Chart.AppVersion $svc.image.tag }}"
+          imagePullPolicy: {{ $.Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+          envFrom:
+            - configMapRef:
+                name: ddag-config
+            - secretRef:
+                name: ddag-secrets
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ $svc.port }}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $svc.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            {{- toYaml (default $.Values.defaultResources $svc.resources) | nindent 12 }}
+{{- end }}
+{{- end }}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ddag/ddag/internal/httpx"
+	"github.com/ddag/ddag/internal/internalauth"
 )
 
 // ConnectorRequest is the gateway→connector query request (PRD §16.2).
@@ -18,15 +19,17 @@ type ConnectorRequest struct {
 	Parameters    map[string]any `json:"parameters"`
 	TimeoutMS     int            `json:"timeout_ms"`
 	Limit         int            `json:"limit"`
+	Offset        int            `json:"offset"`
 }
 
 // ConnectorResponse is the connector→gateway query response (PRD §16.2).
 type ConnectorResponse struct {
-	Success    bool             `json:"success"`
-	DurationMS int64            `json:"duration_ms"`
-	RowCount   int              `json:"row_count"`
-	Rows       []map[string]any `json:"rows"`
-	Error      *struct {
+	Success      bool             `json:"success"`
+	DurationMS   int64            `json:"duration_ms"`
+	RowCount     int              `json:"row_count"`
+	CircuitState string           `json:"circuit_state,omitempty"`
+	Rows         []map[string]any `json:"rows"`
+	Error        *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
@@ -34,15 +37,23 @@ type ConnectorResponse struct {
 
 // ConnectorClient calls a connector service for a given database type.
 type ConnectorClient struct {
-	urls map[string]string // db_type -> base url
-	http *http.Client
+	urls         map[string]string // db_type -> base url
+	http         *http.Client
+	internalAuth string
+	circuits     *circuitStateCache
 }
 
 // NewConnectorClient builds a client from a db_type→URL map.
-func NewConnectorClient(urls map[string]string) *ConnectorClient {
+func NewConnectorClient(urls map[string]string, internalAuth ...string) *ConnectorClient {
+	secret := ""
+	if len(internalAuth) > 0 {
+		secret = internalAuth[0]
+	}
 	return &ConnectorClient{
-		urls: urls,
-		http: &http.Client{Timeout: 60 * time.Second},
+		urls:         urls,
+		http:         &http.Client{Timeout: 60 * time.Second},
+		internalAuth: secret,
+		circuits:     newCircuitStateCache(30 * time.Second),
 	}
 }
 
@@ -53,6 +64,9 @@ func (c *ConnectorClient) Query(ctx context.Context, dbType string, req Connecto
 	if !ok {
 		return nil, httpx.NewError(httpx.CodeConnectorError, "no connector configured for "+dbType)
 	}
+	if c.circuits.IsOpen(req.ConnectionID) {
+		return nil, httpx.NewError(httpx.CodeSourceDBUnavailable, "Database connection temporarily unavailable (circuit open)")
+	}
 	body, _ := json.Marshal(req)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/query", bytes.NewReader(body))
 	if err != nil {
@@ -60,6 +74,9 @@ func (c *ConnectorClient) Query(ctx context.Context, dbType string, req Connecto
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set(httpx.RequestIDHeader, req.RequestID)
+	if c.internalAuth != "" {
+		internalauth.SignHeaders(httpReq, body, c.internalAuth, time.Now())
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
@@ -71,6 +88,7 @@ func (c *ConnectorClient) Query(ctx context.Context, dbType string, req Connecto
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
 		return nil, httpx.NewError(httpx.CodeConnectorError, "invalid connector response")
 	}
+	c.circuits.Set(req.ConnectionID, cr.CircuitState)
 	if resp.StatusCode == http.StatusRequestTimeout {
 		return nil, httpx.NewError(httpx.CodeQueryTimeout, "query timed out")
 	}

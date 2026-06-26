@@ -65,6 +65,22 @@ func (s *Store) ListClients(ctx context.Context, p ListParams) ([]models.Client,
 	return clients, total, nil
 }
 
+// ListAllClients returns every client with scopes and API grants. Used by the
+// gateway metadata snapshot so the request hot path avoids metadata DB lookups.
+func (s *Store) ListAllClients(ctx context.Context) ([]models.Client, error) {
+	var clients []models.Client
+	if err := s.selectRows(ctx, &clients,
+		`SELECT `+clientCols+` FROM clients ORDER BY created_at DESC`); err != nil {
+		return nil, err
+	}
+	for i := range clients {
+		if err := s.hydrateClient(ctx, &clients[i]); err != nil {
+			return nil, err
+		}
+	}
+	return clients, nil
+}
+
 func (s *Store) GetClientByPK(ctx context.Context, id uuid.UUID) (*models.Client, error) {
 	var c models.Client
 	if err := s.get(ctx, &c, `SELECT `+clientCols+` FROM clients WHERE id=$1`, id); err != nil {

@@ -6,11 +6,22 @@ export interface ListResult<T> { items: T[]; pagination: { page: number; limit: 
 export function useApi() {
   const base = useRuntimeConfig().public.apiBase as string
 
+  function csrfToken() {
+    if (typeof document === 'undefined') return ''
+    return document.cookie.split(';').map((v) => v.trim()).find((v) => v.startsWith('ddag_csrf='))?.split('=')[1] || ''
+  }
+
   async function call<T = any>(method: string, path: string, body?: any): Promise<any> {
+    const headers: Record<string, string> = {}
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const token = csrfToken()
+      if (token) headers['X-CSRF-Token'] = decodeURIComponent(token)
+    }
     try {
       return await $fetch<any>(base + path, {
         method: method as any,
         body,
+        headers,
         credentials: 'include',
       })
     } catch (e: any) {

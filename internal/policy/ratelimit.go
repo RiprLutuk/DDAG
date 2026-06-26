@@ -6,6 +6,7 @@ package policy
 import (
 	"context"
 	_ "embed"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -29,6 +30,15 @@ type Window struct {
 	Suffix   string        // key suffix, e.g. "m"
 	Limit    int           // max requests in the window (0 = unlimited)
 	Duration time.Duration // window length
+}
+
+// RateLimitFailureDecision maps a Redis/limiter error to the configured fail
+// mode. "open" prioritizes availability; "closed" denies the request.
+func RateLimitFailureDecision(mode string) (Decision, bool) {
+	if strings.EqualFold(strings.TrimSpace(mode), "closed") {
+		return Decision{Allowed: false, ExceededScope: "fail_closed"}, true
+	}
+	return Decision{Allowed: true}, false
 }
 
 // RateLimiter enforces fixed-window limits in Redis.

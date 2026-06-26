@@ -8,15 +8,19 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/ddag/ddag/internal/circuit"
 	"github.com/ddag/ddag/internal/config"
 	"github.com/ddag/ddag/internal/connectorpool"
 	"github.com/ddag/ddag/internal/connectors"
 	"github.com/ddag/ddag/internal/db"
 	"github.com/ddag/ddag/internal/httpx"
+	"github.com/ddag/ddag/internal/internalauth"
 	"github.com/ddag/ddag/internal/logging"
 	"github.com/ddag/ddag/internal/metrics"
 	"github.com/ddag/ddag/internal/models"
@@ -27,19 +31,27 @@ import (
 )
 
 type service struct {
-	dbType   string
-	store    *store.Store
-	secrets  secret.Store
-	registry *connectorpool.Registry
-	metrics  *metrics.Metrics
-	log      *logging.Logger
+	dbType             string
+	store              *store.Store
+	secrets            secret.Store
+	registry           *connectorpool.Registry
+	metrics            *metrics.Metrics
+	log                *logging.Logger
+	internalAuthSecret string
+	circuitSettings    circuit.Settings
+	breakerMu          sync.Mutex
+	breakers           map[string]*circuit.Breaker
 }
 
 // Run starts the connector service for the given database type and blocks.
 func Run(dbType string) error {
 	serviceName := "connector-" + dbType
 	cfg := config.Load(serviceName)
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	log := logging.New(serviceName, cfg.LogLevel)
+	cfg.LogWarnings(log)
 	m := metrics.New(serviceName)
 	ctx := context.Background()
 
@@ -55,6 +67,15 @@ func Run(dbType string) error {
 
 	svc := &service{
 		dbType: dbType, store: store.New(pool), secrets: sec, registry: reg, metrics: m, log: log,
+		internalAuthSecret: cfg.Gateway.InternalAuthSecret,
+		circuitSettings: circuit.Settings{
+			MaxRequests:      cfg.Circuit.MaxRequests,
+			Interval:         cfg.Circuit.Interval,
+			Timeout:          cfg.Circuit.Timeout,
+			FailureThreshold: cfg.Circuit.FailureThreshold,
+			FailureRatio:     cfg.Circuit.FailureRatio,
+		},
+		breakers: map[string]*circuit.Breaker{},
 	}
 
 	statsCtx, cancelStats := context.WithCancel(ctx)
@@ -63,6 +84,7 @@ func Run(dbType string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /query", svc.handleQuery)
 	mux.HandleFunc("POST /test", svc.handleTest)
+	mux.HandleFunc("GET /circuits", svc.handleCircuits)
 
 	return server.Service{
 		Name: serviceName, Addr: cfg.HTTPAddr, Handler: mux, Logger: log, Metrics: m,
@@ -86,8 +108,13 @@ func (s *service) handleQuery(w http.ResponseWriter, r *http.Request) {
 		Parameters    map[string]any `json:"parameters"`
 		TimeoutMS     int            `json:"timeout_ms"`
 		Limit         int            `json:"limit"`
+		Offset        int            `json:"offset"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, ok := s.readAuthenticatedBody(w, r)
+	if !ok {
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
 		s.writeErr(w, http.StatusBadRequest, httpx.CodeBadRequest, "invalid request body")
 		return
 	}
@@ -109,34 +136,77 @@ func (s *service) handleQuery(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeSourceDBUnavailable, "connection is disabled")
 		return
 	}
+	breaker := s.breakerFor(conn.ID.String())
+	prevState := breaker.State()
+	if !breaker.Allow(time.Now()) {
+		s.observeCircuit(conn.ID.String(), breaker, prevState)
+		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeSourceDBUnavailable, "Database connection temporarily unavailable (circuit open)", string(breaker.State()))
+		return
+	}
+	s.observeCircuit(conn.ID.String(), breaker, prevState)
 
 	cfg, err := s.poolConfig(r.Context(), conn)
 	if err != nil {
-		s.writeErr(w, http.StatusInternalServerError, httpx.CodeInternal, "failed to resolve connection secret")
+		prevState := breaker.State()
+		breaker.Report(false, time.Now())
+		s.observeCircuit(conn.ID.String(), breaker, prevState)
+		s.writeErr(w, http.StatusInternalServerError, httpx.CodeInternal, "failed to resolve connection secret", string(breaker.State()))
 		return
 	}
 	c, err := s.registry.Acquire(r.Context(), cfg, conn.ConfigVersion)
 	if err != nil {
+		prevState := breaker.State()
+		breaker.Report(false, time.Now())
+		s.observeCircuit(conn.ID.String(), breaker, prevState)
 		s.metrics.ConnectorErr.WithLabelValues(conn.ID.String(), s.dbType).Inc()
 		s.log.Error("pool_acquire_failed", "connection", conn.Name, "error", err.Error())
-		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeSourceDBUnavailable, "source database unavailable")
+		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeSourceDBUnavailable, "source database unavailable", string(breaker.State()))
 		return
 	}
 
 	res, err := c.Query(r.Context(), connectors.QueryRequest{
 		RequestID: req.RequestID, QueryTemplate: req.QueryTemplate,
-		Parameters: req.Parameters, TimeoutMS: req.TimeoutMS, Limit: req.Limit,
+		Parameters: req.Parameters, TimeoutMS: req.TimeoutMS, Limit: req.Limit, Offset: req.Offset,
 	})
 	if err != nil {
+		prevState := breaker.State()
+		breaker.Report(false, time.Now())
+		s.observeCircuit(conn.ID.String(), breaker, prevState)
 		s.metrics.ConnectorErr.WithLabelValues(conn.ID.String(), s.dbType).Inc()
 		// Sanitize: do not leak raw driver errors to the caller (PRD §13.5).
 		s.log.Warn("query_failed", "connection", conn.Name, "error", err.Error())
 		code, status := classifyQueryErr(err)
-		s.writeErr(w, status, code, "query failed")
+		s.writeErr(w, status, code, "query failed", string(breaker.State()))
 		return
 	}
+	prevState = breaker.State()
+	breaker.Report(true, time.Now())
+	s.observeCircuit(conn.ID.String(), breaker, prevState)
+	res.CircuitState = string(breaker.State())
 	s.metrics.QueryDuration.WithLabelValues(conn.ID.String(), s.dbType).Observe(float64(res.DurationMS) / 1000.0)
 	httpx.WriteJSON(w, http.StatusOK, res)
+}
+
+func (s *service) handleCircuits(w http.ResponseWriter, r *http.Request) {
+	if s.internalAuthSecret != "" {
+		if err := internalauth.VerifyHeaders(r, nil, s.internalAuthSecret, time.Now(), time.Minute); err != nil {
+			s.writeErr(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid internal service signature")
+			return
+		}
+	}
+	s.breakerMu.Lock()
+	out := make([]map[string]any, 0, len(s.breakers))
+	for connectionID, breaker := range s.breakers {
+		state := string(breaker.State())
+		out = append(out, map[string]any{
+			"connection_id": connectionID,
+			"db_type":       s.dbType,
+			"state":         state,
+		})
+		s.metrics.CircuitState.WithLabelValues(connectionID, s.dbType).Set(circuitStateValue(circuit.State(state)))
+	}
+	s.breakerMu.Unlock()
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": out})
 }
 
 // handleTest tests connectivity using the provided (unsaved) parameters so the
@@ -153,7 +223,11 @@ func (s *service) handleTest(w http.ResponseWriter, r *http.Request) {
 		SSLMode          string `json:"ssl_mode"`
 		ConnectTimeoutMS int    `json:"connection_timeout_ms"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, ok := s.readAuthenticatedBody(w, r)
+	if !ok {
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
 		s.writeErr(w, http.StatusBadRequest, httpx.CodeBadRequest, "invalid request body")
 		return
 	}
@@ -206,11 +280,68 @@ func (s *service) poolConfig(ctx context.Context, conn *models.DatabaseConnectio
 	}, nil
 }
 
-func (s *service) writeErr(w http.ResponseWriter, status int, code, msg string) {
-	httpx.WriteJSON(w, status, map[string]any{
+func (s *service) writeErr(w http.ResponseWriter, status int, code, msg string, circuitState ...string) {
+	body := map[string]any{
 		"success": false,
 		"error":   map[string]string{"code": code, "message": msg},
-	})
+	}
+	if len(circuitState) > 0 && circuitState[0] != "" {
+		body["circuit_state"] = circuitState[0]
+	}
+	httpx.WriteJSON(w, status, body)
+}
+
+func (s *service) readAuthenticatedBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		s.writeErr(w, http.StatusBadRequest, httpx.CodeBadRequest, "invalid request body")
+		return nil, false
+	}
+	if s.internalAuthSecret == "" {
+		return body, true
+	}
+	if err := internalauth.VerifyHeaders(r, body, s.internalAuthSecret, time.Now(), time.Minute); err != nil {
+		s.writeErr(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid internal service signature")
+		return nil, false
+	}
+	return body, true
+}
+
+func (s *service) breakerFor(connectionID string) *circuit.Breaker {
+	s.breakerMu.Lock()
+	defer s.breakerMu.Unlock()
+	if b, ok := s.breakers[connectionID]; ok {
+		return b
+	}
+	b := circuit.New(s.circuitSettings)
+	s.breakers[connectionID] = b
+	s.metrics.CircuitState.WithLabelValues(connectionID, s.dbType).Set(circuitStateValue(b.State()))
+	return b
+}
+
+func (s *service) observeCircuit(connectionID string, breaker *circuit.Breaker, prev circuit.State) {
+	state := breaker.State()
+	s.metrics.CircuitState.WithLabelValues(connectionID, s.dbType).Set(circuitStateValue(state))
+	if state == prev {
+		return
+	}
+	switch state {
+	case circuit.StateOpen:
+		s.metrics.CircuitOpen.WithLabelValues(connectionID, s.dbType).Inc()
+	case circuit.StateHalfOpen:
+		s.metrics.CircuitHalfOpen.WithLabelValues(connectionID, s.dbType).Inc()
+	}
+}
+
+func circuitStateValue(state circuit.State) float64 {
+	switch state {
+	case circuit.StateHalfOpen:
+		return 1
+	case circuit.StateOpen:
+		return 2
+	default:
+		return 0
+	}
 }
 
 func msDur(ms, def int) time.Duration {

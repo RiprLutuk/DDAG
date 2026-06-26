@@ -14,19 +14,20 @@ import (
 
 // payload is the cacheable response body: the data plus optional pagination.
 type payload struct {
-	Data       json.RawMessage   `json:"data"`
-	Pagination *httpx.Pagination `json:"pagination,omitempty"`
+	Data         json.RawMessage   `json:"data"`
+	Pagination   *httpx.Pagination `json:"pagination,omitempty"`
+	CircuitState string            `json:"circuit_state,omitempty"`
 }
 
 // buildPayload shapes the connector rows into a single object (for single-row
 // endpoints) or a list with pagination.
-func buildPayload(resp *gateway.ConnectorResponse, isList bool, effLimit int) payload {
+func buildPayload(resp *gateway.ConnectorResponse, isList bool, page, effLimit, offset int) payload {
 	if !isList {
 		if len(resp.Rows) == 0 {
-			return payload{Data: json.RawMessage("null")}
+			return payload{Data: json.RawMessage("null"), CircuitState: resp.CircuitState}
 		}
 		b, _ := json.Marshal(resp.Rows[0])
-		return payload{Data: b}
+		return payload{Data: b, CircuitState: resp.CircuitState}
 	}
 	rows := resp.Rows
 	if rows == nil {
@@ -34,13 +35,19 @@ func buildPayload(resp *gateway.ConnectorResponse, isList bool, effLimit int) pa
 	}
 	b, _ := json.Marshal(rows)
 	return payload{
-		Data:       b,
-		Pagination: &httpx.Pagination{Page: 1, Limit: effLimit, Total: int64(len(rows))},
+		Data:         b,
+		CircuitState: resp.CircuitState,
+		Pagination:   &httpx.Pagination{Page: page, Limit: effLimit, Offset: offset, Total: int64(len(rows)), HasNext: len(rows) == effLimit},
 	}
 }
 
+type connectorPayload struct {
+	Payload  payload
+	SourceMS int64
+}
+
 func (s *service) writePayload(w http.ResponseWriter, r *http.Request, p payload, cached bool, start time.Time, sourceMS int64) {
-	meta := &httpx.Meta{Cached: cached, DurationMS: time.Since(start).Milliseconds()}
+	meta := &httpx.Meta{Cached: cached, DurationMS: time.Since(start).Milliseconds(), CircuitState: p.CircuitState}
 	if p.Pagination != nil {
 		httpx.WriteJSON(w, http.StatusOK, httpx.ListEnvelope{
 			Success: true, RequestID: httpx.RequestID(r.Context()),

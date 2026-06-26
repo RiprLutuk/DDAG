@@ -4,7 +4,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"strconv"
@@ -26,6 +28,9 @@ type Config struct {
 	Auth     AuthConfig
 	Session  SessionConfig
 	Gateway  GatewayConfig
+	Circuit  CircuitConfig
+
+	DashboardOrigins []string
 }
 
 // PostgresConfig describes a pgx connection pool. Used for the metadata DB and,
@@ -84,6 +89,7 @@ type SecretConfig struct {
 // the gateway uses to verify access tokens.
 type AuthConfig struct {
 	Issuer              string
+	Audience            string
 	PrivateKeyPEM       string        // RS256 private key (PEM); auth-service only
 	PrivateKeyPath      string        // optional file path alternative
 	KeyID               string        // kid published in JWKS
@@ -91,6 +97,7 @@ type AuthConfig struct {
 	RefreshTokenTTL     time.Duration // default refresh-token lifetime
 	JWKSURL             string        // gateway: where to fetch verification keys
 	JWKSRefreshInterval time.Duration
+	ClockSkew           time.Duration
 }
 
 // SessionConfig configures dashboard (human) login sessions in admin-backend.
@@ -105,14 +112,26 @@ type SessionConfig struct {
 
 // GatewayConfig configures the dynamic API gateway data plane.
 type GatewayConfig struct {
-	PolicyMode    string            // inprocess | remote
-	CacheMode     string            // inprocess | remote
-	PolicyURL     string            // when PolicyMode=remote
-	CacheURL      string            // when CacheMode=remote
-	ConnectorURLs map[string]string // db_type -> connector base URL
-	RouteRefresh  time.Duration     // how often the gateway reloads API definitions
-	DefaultLimit  int               // default row limit for list/search
-	MaxLimit      int               // hard cap on row limit
+	PolicyMode         string            // inprocess | remote
+	CacheMode          string            // inprocess | remote
+	PolicyURL          string            // when PolicyMode=remote
+	CacheURL           string            // when CacheMode=remote
+	ConnectorURLs      map[string]string // db_type -> connector base URL
+	RouteRefresh       time.Duration     // how often the gateway reloads API definitions
+	DefaultLimit       int               // default row limit for list/search
+	MaxLimit           int               // hard cap on row limit
+	TrustedProxies     []string          // CIDR/single-IP ranges allowed to set X-Forwarded-For
+	RateLimitFailMode  string            // open | closed
+	InternalAuthSecret string            // HMAC secret for gateway->connector requests
+}
+
+// CircuitConfig configures connector-side circuit breakers.
+type CircuitConfig struct {
+	MaxRequests      int
+	Interval         time.Duration
+	Timeout          time.Duration
+	FailureThreshold int
+	FailureRatio     float64
 }
 
 // Load builds a Config for the named service from the environment.
@@ -148,6 +167,7 @@ func Load(service string) Config {
 		},
 		Auth: AuthConfig{
 			Issuer:              getEnv("DDAG_TOKEN_ISSUER", "https://ddag.local"),
+			Audience:            getEnv("DDAG_TOKEN_AUDIENCE", "ddag-api"),
 			PrivateKeyPEM:       getEnv("DDAG_JWT_PRIVATE_KEY", ""),
 			PrivateKeyPath:      getEnv("DDAG_JWT_PRIVATE_KEY_PATH", "configs/dev-jwt-private.pem"),
 			KeyID:               getEnv("DDAG_JWT_KID", "ddag-dev-1"),
@@ -155,6 +175,7 @@ func Load(service string) Config {
 			RefreshTokenTTL:     getEnvDuration("DDAG_REFRESH_TOKEN_TTL", 720*time.Hour),
 			JWKSURL:             getEnv("DDAG_JWKS_URL", "http://localhost:8081/.well-known/jwks.json"),
 			JWKSRefreshInterval: getEnvDuration("DDAG_JWKS_REFRESH", 5*time.Minute),
+			ClockSkew:           getEnvDuration("DDAG_TOKEN_CLOCK_SKEW", 30*time.Second),
 		},
 		Session: SessionConfig{
 			Secret:         getEnv("DDAG_SESSION_SECRET", "dev-insecure-session-secret-change-me"),
@@ -164,6 +185,7 @@ func Load(service string) Config {
 			MaxFailedLogin: getEnvInt("DDAG_MAX_FAILED_LOGIN", 5),
 			LockoutWindow:  getEnvDuration("DDAG_LOCKOUT_WINDOW", 15*time.Minute),
 		},
+		DashboardOrigins: splitCSV(getEnv("DDAG_DASHBOARD_ORIGINS", "")),
 		Gateway: GatewayConfig{
 			PolicyMode: getEnv("DDAG_POLICY_MODE", "inprocess"),
 			CacheMode:  getEnv("DDAG_CACHE_MODE", "inprocess"),
@@ -175,12 +197,77 @@ func Load(service string) Config {
 				"oracle":    getEnv("DDAG_CONNECTOR_ORACLE_URL", "http://localhost:8092"),
 				"sqlserver": getEnv("DDAG_CONNECTOR_SQLSERVER_URL", "http://localhost:8093"),
 			},
-			RouteRefresh: getEnvDuration("DDAG_ROUTE_REFRESH", 15*time.Second),
-			DefaultLimit: getEnvInt("DDAG_DEFAULT_LIMIT", 100),
-			MaxLimit:     getEnvInt("DDAG_MAX_LIMIT", 1000),
+			RouteRefresh:       getEnvDuration("DDAG_ROUTE_REFRESH", 15*time.Second),
+			DefaultLimit:       getEnvInt("DDAG_DEFAULT_LIMIT", 100),
+			MaxLimit:           getEnvInt("DDAG_MAX_LIMIT", 1000),
+			TrustedProxies:     splitCSV(getEnv("DDAG_TRUSTED_PROXIES", "")),
+			RateLimitFailMode:  strings.ToLower(getEnv("DDAG_RATE_LIMIT_FAIL_MODE", "open")),
+			InternalAuthSecret: getEnv("DDAG_INTERNAL_AUTH_SECRET", ""),
+		},
+		Circuit: CircuitConfig{
+			MaxRequests:      getEnvInt("DDAG_CB_MAX_REQUESTS", 1),
+			Interval:         getEnvDuration("DDAG_CB_INTERVAL", 60*time.Second),
+			Timeout:          getEnvDuration("DDAG_CB_TIMEOUT", 30*time.Second),
+			FailureThreshold: getEnvInt("DDAG_CB_FAILURE_THRESHOLD", 5),
+			FailureRatio:     getEnvFloat("DDAG_CB_FAILURE_RATIO", 0.6),
 		},
 	}
 	return c
+}
+
+// Validate enforces startup safety rules. In production it refuses known-dev
+// secrets and insecure cookies so a service cannot accidentally boot with local
+// defaults.
+func (c Config) Validate() error {
+	if strings.ToLower(c.Env) != "prod" {
+		return nil
+	}
+	var problems []string
+	if c.Secret.MasterKeyB64 == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" {
+		problems = append(problems, "DDAG_MASTER_KEY must not use the development default")
+	}
+	if c.Session.Secret == "dev-insecure-session-secret-change-me" {
+		problems = append(problems, "DDAG_SESSION_SECRET must not use the development default")
+	}
+	if !c.Session.CookieSecure {
+		problems = append(problems, "DDAG_SESSION_COOKIE_SECURE must be true in production")
+	}
+	if p := getEnv("DDAG_SUPERADMIN_PASSWORD", "Admin#12345"); p == "" || p == "Admin#12345" {
+		problems = append(problems, "DDAG_SUPERADMIN_PASSWORD must not use the development default")
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// Warnings returns non-fatal production hardening findings that operators should
+// fix before exposing DDAG.
+func (c Config) Warnings() []string {
+	if strings.ToLower(c.Env) != "prod" {
+		return nil
+	}
+	var warnings []string
+	for _, origin := range c.DashboardOrigins {
+		origin = strings.TrimSpace(strings.ToLower(origin))
+		if origin == "*" || strings.Contains(origin, "localhost") || strings.Contains(origin, "127.0.0.1") {
+			warnings = append(warnings, "DDAG_DASHBOARD_ORIGINS should not include wildcard or localhost origins in production")
+			break
+		}
+	}
+	if strings.EqualFold(c.Metadata.SSLMode, "disable") {
+		warnings = append(warnings, "DDAG_DB_SSLMODE should not be disable in production")
+	}
+	return warnings
+}
+
+func (c Config) LogWarnings(log *slog.Logger) {
+	if log == nil {
+		return
+	}
+	for _, warning := range c.Warnings() {
+		log.Warn("config_warning", "warning", warning)
+	}
 }
 
 // defaultAddr assigns a stable local port per service so all of them can run
@@ -234,6 +321,33 @@ func getEnvDuration(key string, def time.Duration) time.Duration {
 		if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil {
 			return d
 		}
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return time.Duration(n) * time.Second
+		}
 	}
 	return def
+}
+
+func getEnvFloat(key string, def float64) float64 {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if n, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func splitCSV(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

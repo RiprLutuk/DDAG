@@ -35,11 +35,16 @@ container/Kubernetes deployment.
 - **Policy engine** — scope checks, per-client API access, IP whitelist (CIDR),
   and Redis-backed rate limiting that is consistent across replicas.
 - **Caching** — per-endpoint TTL cache with vary-by-client and manual purge.
+- **Enterprise hardening** — singleflight-protected cache miss fills, connector
+  circuit breakers, trusted proxy IP handling, configurable rate-limit fail mode,
+  service-to-service HMAC auth, JWT audience validation, CSRF-protected
+  dashboard sessions, and generated OpenAPI.
 - **Security by default** — parameter binding only (no string concatenation),
   read-only queries unless explicitly flagged, secrets envelope-encrypted at rest
   and redacted from logs, append-only audit log enforced in the database.
 - **Observability from day one** — every service exposes `/metrics`, `/healthz`,
-  `/readyz`; Prometheus scrape config and a Grafana dashboard are included.
+  `/readyz`; Prometheus scrape config and a Grafana dashboard are included,
+  including singleflight, metadata-sync, and circuit-breaker metrics.
 
 ---
 
@@ -126,6 +131,10 @@ curl localhost:8082/api/v1/brim/sites/ABC123 -H "Authorization: Bearer $TOKEN"
 # Search work orders (POST body parameter)
 curl -XPOST localhost:8082/api/v1/brim/workorders/search \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"status":"OPEN"}'
+
+# Download generated OpenAPI for published APIs
+curl localhost:8082/openapi.json -H "Authorization: Bearer $TOKEN"
+curl localhost:8082/openapi.yaml -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
@@ -158,6 +167,16 @@ HPA for high-traffic services, Ingress, ServiceMonitor, Redis):
 kubectl apply -k deploy/k8s
 ```
 
+Helm profiles are also available:
+
+```bash
+helm upgrade --install ddag deploy/helm/ddag -n ddag --create-namespace
+helm upgrade --install ddag deploy/helm/ddag -n ddag -f deploy/helm/ddag/values-enterprise.yaml
+```
+
+The CI workflow renders every Helm profile with `helm template` and builds the
+gateway/dashboard container images before Trivy scanning.
+
 Replace the placeholder values in `secret.yaml` (master key, session secret, DB
 password) using your secret manager, and point `configmap.yaml` at your external
 metadata DB. Connector services are deliberately not exposed via Ingress.
@@ -182,7 +201,8 @@ make dashboard  # run the Nuxt dashboard dev server
 ## Security model (summary)
 
 - API consumers authenticate with OAuth2 bearer tokens; the dashboard uses a
-  signed, http-only session cookie with lockout after repeated failures.
+  signed, http-only session cookie with lockout after repeated failures and a
+  double-submit CSRF token for state-changing requests.
 - Authorization is enforced **in the backend**, never only in the UI: RBAC for
   the dashboard, scope + per-client API grants + IP whitelist for the data plane.
 - Queries use bound parameters exclusively; write statements are rejected at
@@ -190,6 +210,8 @@ make dashboard  # run the Nuxt dashboard dev server
 - Source-DB secrets are envelope-encrypted at rest and never logged; structured
   logs redact sensitive keys.
 - The audit log is append-only (enforced by a database trigger).
+- Gateway-to-connector calls are HMAC-signed when `DDAG_INTERNAL_AUTH_SECRET` is
+  configured; connectors reject unsigned internal requests in that mode.
 
 Open questions and post-MVP items are tracked against the [PRD](PRD.md).
 

@@ -33,11 +33,18 @@ type Metrics struct {
 	TokenFailed  prometheus.Counter
 	TokenRevoked prometheus.Counter
 
-	QueryDuration *prometheus.HistogramVec // by connection, db_type
-	ConnectorErr  *prometheus.CounterVec   // by connection, db_type
-	PoolInUse     *prometheus.GaugeVec     // by connection
-	PoolIdle      *prometheus.GaugeVec     // by connection
-	PoolMax       *prometheus.GaugeVec     // by connection
+	SingleflightActive prometheus.Gauge
+	SingleflightShared prometheus.Counter
+	MetadataSync       prometheus.Counter
+
+	QueryDuration   *prometheus.HistogramVec // by connection, db_type
+	ConnectorErr    *prometheus.CounterVec   // by connection, db_type
+	CircuitState    *prometheus.GaugeVec     // by connection, db_type
+	CircuitOpen     *prometheus.CounterVec   // by connection, db_type
+	CircuitHalfOpen *prometheus.CounterVec   // by connection, db_type
+	PoolInUse       *prometheus.GaugeVec     // by connection
+	PoolIdle        *prometheus.GaugeVec     // by connection
+	PoolMax         *prometheus.GaugeVec     // by connection
 }
 
 // New creates and registers the DDAG metric set for the given service.
@@ -86,6 +93,15 @@ func New(service string) *Metrics {
 		TokenRevoked: f.NewCounter(prometheus.CounterOpts{
 			Name: "ddag_token_revoked_total", Help: "Tokens revoked.", ConstLabels: labels,
 		}),
+		SingleflightActive: f.NewGauge(prometheus.GaugeOpts{
+			Name: "ddag_singleflight_active", Help: "Active singleflight cache fills.", ConstLabels: labels,
+		}),
+		SingleflightShared: f.NewCounter(prometheus.CounterOpts{
+			Name: "ddag_singleflight_shared", Help: "Shared singleflight results.", ConstLabels: labels,
+		}),
+		MetadataSync: f.NewCounter(prometheus.CounterOpts{
+			Name: "ddag_metadata_sync_total", Help: "Metadata sync events received via Pub/Sub.", ConstLabels: labels,
+		}),
 		QueryDuration: f.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "ddag_db_query_duration_seconds", Help: "Source DB query duration.",
 			ConstLabels: labels,
@@ -93,6 +109,15 @@ func New(service string) *Metrics {
 		}, []string{"connection", "db_type"}),
 		ConnectorErr: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "ddag_connector_errors_total", Help: "Connector errors.", ConstLabels: labels,
+		}, []string{"connection", "db_type"}),
+		CircuitState: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ddag_circuit_state", Help: "Circuit breaker state: 0=closed, 1=half-open, 2=open.", ConstLabels: labels,
+		}, []string{"connection", "db_type"}),
+		CircuitOpen: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_circuit_open_total", Help: "Circuit breaker open events.", ConstLabels: labels,
+		}, []string{"connection", "db_type"}),
+		CircuitHalfOpen: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_circuit_half_open_total", Help: "Circuit breaker half-open transitions.", ConstLabels: labels,
 		}, []string{"connection", "db_type"}),
 		PoolInUse: f.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "ddag_pool_in_use_connections", Help: "In-use pool connections.", ConstLabels: labels,

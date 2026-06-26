@@ -18,8 +18,15 @@ type AccessClaims struct {
 	jwt.RegisteredClaims
 }
 
+// TokenValidation configures access-token validation at consumers.
+type TokenValidation struct {
+	Issuer    string
+	Audience  string
+	ClockSkew time.Duration
+}
+
 // IssueAccessToken signs an RS256 access token for a client with the given scope.
-func IssueAccessToken(priv *rsa.PrivateKey, kid, issuer, clientID, scope string, ttl time.Duration) (string, time.Time, error) {
+func IssueAccessToken(priv *rsa.PrivateKey, kid, issuer, audience, clientID, scope string, ttl time.Duration) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(ttl)
 	claims := AccessClaims{
@@ -32,6 +39,7 @@ func IssueAccessToken(priv *rsa.PrivateKey, kid, issuer, clientID, scope string,
 			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
 			ID:        "at-" + randHex(8),
+			Audience:  jwt.ClaimStrings{audience},
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -46,7 +54,23 @@ type Keyfunc func(kid string) (*rsa.PublicKey, bool)
 // ParseAccessToken validates an RS256 access token's signature, exp and nbf, and
 // returns the claims. The key is resolved via the kid header.
 func ParseAccessToken(tokenStr string, keyfunc Keyfunc) (*AccessClaims, error) {
+	return ParseAccessTokenWithValidation(tokenStr, keyfunc, TokenValidation{})
+}
+
+// ParseAccessTokenWithValidation validates signature, exp, nbf, issuer,
+// audience and clock-skew leeway for an RS256 access token.
+func ParseAccessTokenWithValidation(tokenStr string, keyfunc Keyfunc, validation TokenValidation) (*AccessClaims, error) {
 	claims := &AccessClaims{}
+	opts := []jwt.ParserOption{jwt.WithValidMethods([]string{"RS256"})}
+	if validation.Issuer != "" {
+		opts = append(opts, jwt.WithIssuer(validation.Issuer))
+	}
+	if validation.Audience != "" {
+		opts = append(opts, jwt.WithAudience(validation.Audience))
+	}
+	if validation.ClockSkew > 0 {
+		opts = append(opts, jwt.WithLeeway(validation.ClockSkew))
+	}
 	_, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
@@ -57,7 +81,7 @@ func ParseAccessToken(tokenStr string, keyfunc Keyfunc) (*AccessClaims, error) {
 			return nil, errors.New("unknown signing key")
 		}
 		return key, nil
-	}, jwt.WithValidMethods([]string{"RS256"}))
+	}, opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,14 @@
+services:
+  admin-backend: { replicas: 2 }
+  auth-service: { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 } }
+  api-gateway: { replicas: 3, hpa: { enabled: true, minReplicas: 3, maxReplicas: 12, cpu: 65 } }
+  policy-engine: { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 } }
+  cache-service: { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 } }
+  worker: { replicas: 1 }
+  connector-postgres: { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, cpu: 70 } }
+  connector-mysql: { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, cpu: 70 } }
+  connector-oracle: { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, cpu: 70 } }
+  connector-sqlserver: { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 10, cpu: 70 } }
+
+serviceMonitor:
+  enabled: true

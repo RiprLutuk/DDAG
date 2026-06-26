@@ -10,15 +10,18 @@ import (
 
 // Meta carries response metadata included on every success response.
 type Meta struct {
-	Cached     bool  `json:"cached"`
-	DurationMS int64 `json:"duration_ms"`
+	Cached       bool   `json:"cached"`
+	DurationMS   int64  `json:"duration_ms"`
+	CircuitState string `json:"circuit_state,omitempty"`
 }
 
 // Pagination is included on list/search responses.
 type Pagination struct {
-	Page  int   `json:"page"`
-	Limit int   `json:"limit"`
-	Total int64 `json:"total"`
+	Page    int   `json:"page"`
+	Limit   int   `json:"limit"`
+	Offset  int   `json:"offset"`
+	Total   int64 `json:"total"`
+	HasNext bool  `json:"has_next"`
 }
 
 // SuccessEnvelope is the standard single-object success response.

@@ -2,7 +2,10 @@ package httpx
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -104,22 +107,86 @@ func RecoverMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// ClientIP extracts the best-effort client IP, honoring X-Forwarded-For and
-// X-Real-IP set by trusted ingress/proxies (used for IP whitelist + audit).
+// ClientIP extracts the direct peer IP. Forwarded headers are intentionally not
+// trusted without explicit proxy configuration.
 func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// First entry is the original client.
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
+	return directIP(r)
+}
+
+// ParseTrustedProxies parses a comma-separated set of CIDR ranges or single IPs
+// allowed to set X-Forwarded-For/X-Real-IP.
+func ParseTrustedProxies(v string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(v) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]netip.Prefix, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
 		}
-		return strings.TrimSpace(xff)
+		if strings.Contains(p, "/") {
+			prefix, err := netip.ParsePrefix(p)
+			if err != nil {
+				return nil, fmt.Errorf("parse trusted proxy %q: %w", p, err)
+			}
+			out = append(out, prefix.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(p)
+		if err != nil {
+			return nil, fmt.Errorf("parse trusted proxy %q: %w", p, err)
+		}
+		bits := 32
+		if addr.Is6() {
+			bits = 128
+		}
+		out = append(out, netip.PrefixFrom(addr, bits))
 	}
-	if xr := r.Header.Get("X-Real-IP"); xr != "" {
-		return strings.TrimSpace(xr)
+	return out, nil
+}
+
+// ClientIPWithTrustedProxies honors forwarded headers only when the direct peer
+// belongs to a configured trusted proxy range.
+func ClientIPWithTrustedProxies(r *http.Request, trusted []netip.Prefix) string {
+	remote := directIP(r)
+	addr, err := netip.ParseAddr(remote)
+	if err != nil || !trustedProxy(addr, trusted) {
+		return remote
 	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		for _, part := range strings.Split(xff, ",") {
+			candidate := strings.TrimSpace(part)
+			if _, err := netip.ParseAddr(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" {
+		if _, err := netip.ParseAddr(xr); err == nil {
+			return xr
+		}
+	}
+	return remote
+}
+
+func trustedProxy(addr netip.Addr, trusted []netip.Prefix) bool {
+	for _, p := range trusted {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func directIP(r *http.Request) string {
 	host := r.RemoteAddr
-	if i := strings.LastIndexByte(host, ':'); i >= 0 {
-		return host[:i]
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return strings.Trim(host, "[]")
 	}
 	return host
 }

@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/ddag/ddag/internal/httpx"
+	"github.com/ddag/ddag/internal/internalauth"
 	"github.com/ddag/ddag/internal/models"
 )
 
@@ -203,6 +205,9 @@ func (s *service) callConnectorTest(ctx context.Context, dbType string, payload 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if s.cfg.Gateway.InternalAuthSecret != "" {
+		internalauth.SignHeaders(req, body, s.cfg.Gateway.InternalAuthSecret, time.Now())
+	}
 	resp, err := s.httpc.Do(req)
 	if err != nil {
 		return nil, err

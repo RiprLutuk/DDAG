@@ -32,7 +32,11 @@ type service struct {
 // Run starts the policy-engine and blocks.
 func Run() error {
 	cfg := config.Load("policy-engine")
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	log := logging.New("policy-engine", cfg.LogLevel)
+	cfg.LogWarnings(log)
 	m := metrics.New("policy-engine")
 	ctx := context.Background()
 

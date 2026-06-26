@@ -58,11 +58,25 @@ func (s *service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorCode(w, r, httpx.CodeInternal, "failed to create session")
 		return
 	}
+	csrfToken, err := auth.GenerateSecret(24)
+	if err != nil {
+		httpx.ErrorCode(w, r, httpx.CodeInternal, "failed to create csrf token")
+		return
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     s.cfg.Session.CookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.cfg.Session.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  exp,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "ddag_csrf",
+		Value:    csrfToken,
+		Path:     "/",
+		HttpOnly: false,
 		Secure:   s.cfg.Session.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  exp,
@@ -84,6 +98,10 @@ func (s *service) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *service) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: s.cfg.Session.CookieName, Value: "", Path: "/", HttpOnly: true,
+		Secure: s.cfg.Session.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name: "ddag_csrf", Value: "", Path: "/", HttpOnly: false,
 		Secure: s.cfg.Session.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 	if p := principalOf(r); p != nil {

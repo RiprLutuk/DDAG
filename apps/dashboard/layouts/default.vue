@@ -26,7 +26,7 @@ const groups: NavGroup[] = [
   {
     title: 'Operations', items: [
       { to: '/cache', label: 'Cache', ico: '⚡', perms: ['view_monitoring', 'purge_cache'] },
-      { to: '/monitoring', label: 'Monitoring', ico: '◴', perms: ['view_monitoring'] },
+      { to: '/monitoring', label: 'Monitoring', ico: '◴', perms: ['view_monitoring', 'view_circuit_state'] },
       { to: '/logs', label: 'Request Logs', ico: '☰', perms: ['view_monitoring'] },
       { to: '/audit', label: 'Audit Logs', ico: '✓', perms: ['view_audit'] },
     ],

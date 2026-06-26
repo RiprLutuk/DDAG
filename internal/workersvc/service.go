@@ -19,7 +19,11 @@ import (
 // Run starts the worker and blocks.
 func Run() error {
 	cfg := config.Load("worker")
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	log := logging.New("worker", cfg.LogLevel)
+	cfg.LogWarnings(log)
 	m := metrics.New("worker")
 	ctx := context.Background()
 

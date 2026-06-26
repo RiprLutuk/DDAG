@@ -44,6 +44,7 @@ func (c *sqlConnector) Query(ctx context.Context, req QueryRequest) (*QueryResul
 	if err != nil {
 		return nil, err
 	}
+	query, args = ApplyPagination(query, args, c.cfg.DatabaseType, req.Limit, req.Offset)
 	qctx, cancel := context.WithTimeout(ctx, queryTO(c.cfg, req.TimeoutMS))
 	defer cancel()
 
@@ -60,9 +61,6 @@ func (c *sqlConnector) Query(ctx context.Context, req QueryRequest) (*QueryResul
 	}
 	out := make([]map[string]any, 0, 16)
 	for rows.Next() {
-		if req.Limit > 0 && len(out) >= req.Limit {
-			break
-		}
 		raw := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
 		for i := range raw {

@@ -39,14 +39,16 @@ type QueryRequest struct {
 	Parameters    map[string]any `json:"parameters"`
 	TimeoutMS     int            `json:"timeout_ms"`
 	Limit         int            `json:"limit"`
+	Offset        int            `json:"offset"`
 }
 
 // QueryResult is the internal query response (PRD §16.2).
 type QueryResult struct {
-	Success    bool             `json:"success"`
-	DurationMS int64            `json:"duration_ms"`
-	RowCount   int              `json:"row_count"`
-	Rows       []map[string]any `json:"rows"`
+	Success      bool             `json:"success"`
+	DurationMS   int64            `json:"duration_ms"`
+	RowCount     int              `json:"row_count"`
+	CircuitState string           `json:"circuit_state,omitempty"`
+	Rows         []map[string]any `json:"rows"`
 }
 
 // PoolStats reports live pool utilization for metrics.

@@ -78,6 +78,7 @@ func (s *service) createClient(w http.ResponseWriter, r *http.Request) {
 	if len(req.APIs) > 0 {
 		_ = s.store.SetClientAPIs(r.Context(), id, parseUUIDs(req.APIs))
 	}
+	s.publishMetadataSync(r.Context(), "client:create")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "create_client", "client", id.String(), map[string]any{"client_id": req.ClientID}))
 	created, _ := s.store.GetClientByPK(r.Context(), id)
 	// Secret is shown exactly once (PRD §11.4 AC).
@@ -105,6 +106,7 @@ func (s *service) updateClient(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "client:update")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "update_client", "client", id.String(), nil))
 	c, _ := s.store.GetClientByPK(r.Context(), id)
 	ok(w, r, c)
@@ -150,6 +152,7 @@ func (s *service) setClientScopes(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "client:scopes")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "change_scope", "client", id.String(), map[string]any{"scopes": req.Scopes}))
 	c, _ := s.store.GetClientByPK(r.Context(), id)
 	ok(w, r, c)
@@ -170,6 +173,7 @@ func (s *service) setClientAPIs(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "client:apis")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "update_client", "client", id.String(), map[string]any{"apis": req.APIs}))
 	c, _ := s.store.GetClientByPK(r.Context(), id)
 	ok(w, r, c)
@@ -184,6 +188,7 @@ func (s *service) deleteClient(w http.ResponseWriter, r *http.Request) {
 		storeErr(w, r, err)
 		return
 	}
+	s.publishMetadataSync(r.Context(), "client:delete")
 	s.audit.Write(r.Context(), r, s.actorEvent(r, "delete_client", "client", id.String(), nil))
 	ok(w, r, map[string]bool{"ok": true})
 }

@@ -32,7 +32,11 @@ type service struct {
 // Run starts the auth-service and blocks.
 func Run() error {
 	cfg := config.Load("auth-service")
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	log := logging.New("auth-service", cfg.LogLevel)
+	cfg.LogWarnings(log)
 	m := metrics.New("auth-service")
 	ctx := context.Background()
 
@@ -174,7 +178,7 @@ func (s *service) issueTokens(w http.ResponseWriter, r *http.Request, client *mo
 	if accessTTL <= 0 {
 		accessTTL = s.cfg.Auth.AccessTokenTTL
 	}
-	accessToken, _, err := auth.IssueAccessToken(priv, kid, s.cfg.Auth.Issuer, client.ClientID, scope, accessTTL)
+	accessToken, _, err := auth.IssueAccessToken(priv, kid, s.cfg.Auth.Issuer, s.cfg.Auth.Audience, client.ClientID, scope, accessTTL)
 	if err != nil {
 		s.oauthError(w, http.StatusInternalServerError, "server_error", "failed to issue token")
 		return
@@ -234,7 +238,11 @@ func (s *service) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"active": false})
 		return
 	}
-	claims, err := auth.ParseAccessToken(req.Token, s.keys.keyfunc)
+	claims, err := auth.ParseAccessTokenWithValidation(req.Token, s.keys.keyfunc, auth.TokenValidation{
+		Issuer:    s.cfg.Auth.Issuer,
+		Audience:  s.cfg.Auth.Audience,
+		ClockSkew: s.cfg.Auth.ClockSkew,
+	})
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"active": false})
 		return
