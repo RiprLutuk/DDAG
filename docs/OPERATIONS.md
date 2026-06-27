@@ -83,24 +83,35 @@ High-concurrency metrics:
 
 | Metric | Meaning |
 |---|---|
+| `ddag_cache_hits_total` / `ddag_cache_misses_total` | Gateway response-cache hit/miss counters by route |
 | `ddag_singleflight_active` | Active cache-fill calls protected by singleflight |
 | `ddag_singleflight_shared` | Requests that reused another in-flight cache fill |
 | `ddag_metadata_sync_total` | Metadata refreshes triggered by Redis Pub/Sub |
+| `ddag_connector_requests_total` / `ddag_connector_errors_total` | Connector request/error counters by connection and DB type |
 | `ddag_circuit_state` | Circuit state by connection (`0=closed`, `1=half-open`, `2=open`) |
 | `ddag_circuit_open_total` | Circuit open transitions |
 | `ddag_circuit_half_open_total` | Circuit half-open transitions |
-| `ddag_connector_requests_total` | Connector requests by connection and DB type |
-| `ddag_db_pool_active` / `ddag_db_pool_idle` | Runtime source DB pool usage |
-| `ddag_db_pool_wait_count` / `ddag_db_pool_wait_duration_ms` | Pool wait pressure |
+| `ddag_db_query_duration_seconds_bucket` | Source DB query latency histogram by connection and DB type |
+| `ddag_db_pool_active` / `ddag_db_pool_idle` | Runtime source DB pool usage by connection |
+| `ddag_pool_max_connections` | Configured max source DB pool size by connection |
+| `ddag_db_pool_wait_count` / `ddag_db_pool_wait_duration_ms` | Pool wait pressure by connection |
+| `ddag_db_pool_timeout_count` | Pool acquire timeout/cancel count by connection |
 | `ddag_queue_depth` | Gateway backpressure queue depth |
 | `ddag_queued_requests_total` | Requests admitted to the queue |
 | `ddag_queue_timeout_total` / `ddag_rejected_requests_total` | Backpressure timeouts and rejects |
 
+All DDAG metrics include `service` as a Prometheus const label. Code call sites
+only pass the metric-specific variable labels such as `route`, `connection`, and
+`db_type`.
+
 Prometheus scrape config: [deploy/prometheus/prometheus.yml](../deploy/prometheus/prometheus.yml).
 Grafana datasource + dashboard auto-provision from
-[deploy/grafana](../deploy/grafana) (panels: request rate, p95 latency, error
-rate, cache hit ratio, token issue/fail, source-DB query p95, pool usage,
-security events, connector errors).
+[deploy/grafana](../deploy/grafana). The overview dashboard includes request
+rate, p95 latency, 4xx/5xx errors, cache hit ratio, token issue/fail/revoke,
+source-DB query p95, pool active/idle/max, pool pressure, pool wait/timeout,
+connector request/error rate, circuit breaker state/transitions, security
+events, gateway queue events/depth, and singleflight activity. Aggregate panels
+use idle-safe PromQL where an empty healthy state should read as zero.
 
 ## Routine operations
 

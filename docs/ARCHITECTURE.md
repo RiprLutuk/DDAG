@@ -72,8 +72,13 @@ Each source connection has its own pool, configured per connection
 (`min_pool_size`, `max_pool_size`, connect/query timeouts, max conn
 lifetime/idle). `connectorpool.Registry` keys pools by `connection_id` +
 `config_version`; changing a connection's config bumps the version so the next
-acquire rebuilds the pool and the stale one is drained. Pool gauges
-(`ddag_pool_in_use_connections`, `_idle_`, `_max_`) are exported per connection.
+acquire rebuilds the pool and the stale one is drained. Pool gauges are exported
+per connection: v3 active/idle/wait/timeout metrics use the `ddag_db_pool_*`
+prefix, while configured max size remains `ddag_pool_max_connections`.
+
+All DDAG Prometheus metrics include the logical process name as a `service`
+const label, for example `service="connector-postgres"`. Connector-specific
+metrics add low-cardinality variable labels such as `connection` and `db_type`.
 
 PostgreSQL uses `pgxpool`; MySQL/Oracle/SQL Server use `database/sql` with the
 pure-Go drivers (so all services build static, CGO-free images). A connectivity

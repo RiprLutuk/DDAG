@@ -1,6 +1,10 @@
 package metrics
 
-import "testing"
+import (
+	"testing"
+
+	dto "github.com/prometheus/client_model/go"
+)
 
 func TestV2MetricsAreRegistered(t *testing.T) {
 	m := New("test-service")
@@ -66,4 +70,74 @@ func TestV3MetricsAreRegistered(t *testing.T) {
 			t.Fatalf("missing metric %s", want)
 		}
 	}
+}
+
+func TestGatewayDefaultSeriesAreRegistered(t *testing.T) {
+	m := New("api-gateway")
+
+	families, err := m.reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	want := map[string]string{"service": "api-gateway", "route": "unknown"}
+	for _, metricName := range []string{
+		"ddag_cache_hits_total",
+		"ddag_cache_misses_total",
+		"ddag_queued_requests_total",
+		"ddag_queue_depth",
+		"ddag_queue_timeout_total",
+		"ddag_rejected_requests_total",
+	} {
+		assertMetricWithLabels(t, families, metricName, want)
+	}
+}
+
+func TestConnectorDefaultSeriesAreRegistered(t *testing.T) {
+	m := New("connector-postgres")
+
+	families, err := m.reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	want := map[string]string{"service": "connector-postgres", "connection": "unknown", "db_type": "postgres"}
+	for _, metricName := range []string{
+		"ddag_connector_requests_total",
+		"ddag_connector_errors_total",
+		"ddag_circuit_state",
+		"ddag_circuit_open_total",
+		"ddag_circuit_half_open_total",
+	} {
+		assertMetricWithLabels(t, families, metricName, want)
+	}
+}
+
+func assertMetricWithLabels(t *testing.T, families []*dto.MetricFamily, name string, want map[string]string) {
+	t.Helper()
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if metricHasLabels(metric, want) {
+				return
+			}
+		}
+		t.Fatalf("metric %s missing label set %v", name, want)
+	}
+	t.Fatalf("missing metric %s", name)
+}
+
+func metricHasLabels(metric *dto.Metric, want map[string]string) bool {
+	got := make(map[string]string, len(metric.GetLabel()))
+	for _, label := range metric.GetLabel() {
+		got[label.GetName()] = label.GetValue()
+	}
+	for name, value := range want {
+		if got[name] != value {
+			return false
+		}
+	}
+	return true
 }

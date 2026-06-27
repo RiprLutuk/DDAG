@@ -28,28 +28,30 @@
     },
     {
       "type": "timeseries",
-      "title": "Error rate (5xx, req/s)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "title": "HTTP error rate (4xx/5xx, req/s)",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
       "targets": [
-        { "expr": "sum by (service) (rate(ddag_http_requests_total{status=~\"5..\"}[1m]))", "legendFormat": "{{service}}" }
+        { "expr": "sum by (service) (rate(ddag_http_requests_total{status=~\"5..\"}[1m])) or vector(0)", "legendFormat": "{{service}} 5xx" },
+        { "expr": "sum by (service) (rate(ddag_http_requests_total{status=~\"4..\"}[1m])) or vector(0)", "legendFormat": "{{service}} 4xx" }
       ]
     },
     {
       "type": "stat",
       "title": "Cache hit ratio",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
       "targets": [
-        { "expr": "sum(rate(ddag_cache_hits_total[5m])) / clamp_min(sum(rate(ddag_cache_hits_total[5m])) + sum(rate(ddag_cache_misses_total[5m])), 1)" }
+        { "expr": "(sum(rate(ddag_cache_hits_total[5m])) / clamp_min(sum(rate(ddag_cache_hits_total[5m])) + sum(rate(ddag_cache_misses_total[5m])), 1)) or vector(0)" }
       ]
     },
     {
       "type": "timeseries",
       "title": "Tokens issued vs failed (req/s)",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
       "targets": [
-        { "expr": "sum(rate(ddag_token_issued_total[1m]))", "legendFormat": "issued" },
-        { "expr": "sum(rate(ddag_token_failed_total[1m]))", "legendFormat": "failed" }
+        { "expr": "sum(rate(ddag_token_issued_total[1m])) or vector(0)", "legendFormat": "issued" },
+        { "expr": "sum(rate(ddag_token_failed_total[1m])) or vector(0)", "legendFormat": "failed" },
+        { "expr": "sum(rate(ddag_token_revoked_total[1m])) or vector(0)", "legendFormat": "revoked" }
       ]
     },
     {
@@ -57,7 +59,7 @@
       "title": "Source DB query p95 (s)",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "targets": [
-        { "expr": "histogram_quantile(0.95, sum by (le, connection) (rate(ddag_db_query_duration_seconds_bucket[5m])))", "legendFormat": "{{connection}}" }
+        { "expr": "histogram_quantile(0.95, sum by (le, service, db_type, connection) (rate(ddag_db_query_duration_seconds_bucket[5m])))", "legendFormat": "{{service}} {{db_type}} {{connection}}" }
       ]
     },
     {
@@ -65,27 +67,99 @@
       "title": "Connection pool usage",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "targets": [
-        { "expr": "ddag_pool_in_use_connections", "legendFormat": "{{connection}} in-use" },
-        { "expr": "ddag_pool_max_connections", "legendFormat": "{{connection}} max" }
+        { "expr": "ddag_db_pool_active or ddag_pool_in_use_connections", "legendFormat": "{{service}} {{connection}} active" },
+        { "expr": "ddag_db_pool_idle or ddag_pool_idle_connections", "legendFormat": "{{service}} {{connection}} idle" },
+        { "expr": "ddag_pool_max_connections", "legendFormat": "{{service}} {{connection}} max" }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Security events (req/s)",
+      "title": "Pool pressure ratio",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
       "targets": [
-        { "expr": "sum(rate(ddag_unauthorized_total[1m]))", "legendFormat": "401 unauthorized" },
-        { "expr": "sum(rate(ddag_forbidden_total[1m]))", "legendFormat": "403 forbidden" },
-        { "expr": "sum(rate(ddag_rate_limited_total[1m]))", "legendFormat": "429 rate-limited" },
-        { "expr": "sum(rate(ddag_ip_blocked_total[1m]))", "legendFormat": "ip blocked" }
+        { "expr": "((ddag_db_pool_active or ddag_pool_in_use_connections) / clamp_min(ddag_pool_max_connections, 1))", "legendFormat": "{{service}} {{connection}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pool wait and timeout",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "expr": "ddag_db_pool_wait_count", "legendFormat": "{{service}} {{connection}} wait count" },
+        { "expr": "ddag_db_pool_timeout_count", "legendFormat": "{{service}} {{connection}} timeout count" },
+        { "expr": "ddag_db_pool_wait_duration_ms", "legendFormat": "{{service}} {{connection}} wait ms" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Connector request rate (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "targets": [
+        { "expr": "sum by (service, db_type) (rate(ddag_connector_requests_total[1m])) or vector(0)", "legendFormat": "{{service}} {{db_type}}" }
       ]
     },
     {
       "type": "timeseries",
       "title": "Connector errors (req/s)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
       "targets": [
-        { "expr": "sum by (db_type) (rate(ddag_connector_errors_total[1m]))", "legendFormat": "{{db_type}}" }
+        { "expr": "sum by (service, db_type) (rate(ddag_connector_errors_total[1m])) or vector(0)", "legendFormat": "{{service}} {{db_type}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Circuit breaker state",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "targets": [
+        { "expr": "ddag_circuit_state", "legendFormat": "{{service}} {{db_type}} {{connection}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Circuit breaker transitions (events/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "targets": [
+        { "expr": "sum by (service, db_type) (rate(ddag_circuit_open_total[5m])) or vector(0)", "legendFormat": "{{service}} {{db_type}} open" },
+        { "expr": "sum by (service, db_type) (rate(ddag_circuit_half_open_total[5m])) or vector(0)", "legendFormat": "{{service}} {{db_type}} half-open" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Security events (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "targets": [
+        { "expr": "sum(rate(ddag_unauthorized_total[1m])) or vector(0)", "legendFormat": "401 unauthorized" },
+        { "expr": "sum(rate(ddag_forbidden_total[1m])) or vector(0)", "legendFormat": "403 forbidden" },
+        { "expr": "sum(rate(ddag_rate_limited_total[1m])) or vector(0)", "legendFormat": "429 rate-limited" },
+        { "expr": "sum(rate(ddag_ip_blocked_total[1m])) or vector(0)", "legendFormat": "ip blocked" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway queue events (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "targets": [
+        { "expr": "sum by (route) (rate(ddag_queued_requests_total{service=\"api-gateway\"}[1m])) or vector(0)", "legendFormat": "{{route}} queued" },
+        { "expr": "sum by (route) (rate(ddag_queue_timeout_total{service=\"api-gateway\"}[1m])) or vector(0)", "legendFormat": "{{route}} timeout" },
+        { "expr": "sum by (route) (rate(ddag_rejected_requests_total{service=\"api-gateway\"}[1m])) or vector(0)", "legendFormat": "{{route}} rejected" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway queue depth",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
+      "targets": [
+        { "expr": "max by (route) (ddag_queue_depth{service=\"api-gateway\"}) or vector(0)", "legendFormat": "{{route}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway singleflight",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
+      "targets": [
+        { "expr": "ddag_singleflight_active{service=\"api-gateway\"} or vector(0)", "legendFormat": "active fills" },
+        { "expr": "rate(ddag_singleflight_shared{service=\"api-gateway\"}[5m]) or vector(0)", "legendFormat": "shared results/s" }
       ]
     }
   ]

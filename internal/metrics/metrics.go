@@ -6,6 +6,7 @@ package metrics
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -170,7 +171,33 @@ func New(service string) *Metrics {
 			Name: "ddag_rejected_requests_total", Help: "Requests rejected by gateway backpressure.", ConstLabels: labels,
 		}, []string{"route"}),
 	}
+	m.registerDefaultSeries(service)
 	return m
+}
+
+func (m *Metrics) registerDefaultSeries(service string) {
+	const unknown = "unknown"
+	if service == "api-gateway" {
+		m.CacheHits.WithLabelValues(unknown).Add(0)
+		m.CacheMisses.WithLabelValues(unknown).Add(0)
+		m.QueuedRequests.WithLabelValues(unknown).Add(0)
+		m.QueueDepth.WithLabelValues(unknown).Set(0)
+		m.QueueTimeout.WithLabelValues(unknown).Add(0)
+		m.RejectedRequests.WithLabelValues(unknown).Add(0)
+		return
+	}
+	if !strings.HasPrefix(service, "connector-") {
+		return
+	}
+	dbType := strings.TrimPrefix(service, "connector-")
+	if dbType == "" {
+		return
+	}
+	m.ConnectorRequests.WithLabelValues(unknown, dbType).Add(0)
+	m.ConnectorErr.WithLabelValues(unknown, dbType).Add(0)
+	m.CircuitState.WithLabelValues(unknown, dbType).Set(0)
+	m.CircuitOpen.WithLabelValues(unknown, dbType).Add(0)
+	m.CircuitHalfOpen.WithLabelValues(unknown, dbType).Add(0)
 }
 
 // Handler returns the Prometheus /metrics HTTP handler for this registry.
