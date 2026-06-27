@@ -110,6 +110,7 @@ Observability v3 sudah berjalan, tetapi belum production-ready untuk operasi har
    - `ddag_cache_fill_duration_seconds_bucket`
    - `ddag_invalid_token_total`
 6. Connector Oracle sudah ada di repo, tetapi belum tercakup di PRD lama.
+7. Ada minimal satu counter yang secara semantik benar tetapi belum mengikuti naming best-practice Prometheus, misalnya `ddag_singleflight_shared` (counter tanpa suffix `_total`). Ini tidak memblokir operasi, tetapi memunculkan warning/info di query tools dan sebaiknya dimigrasikan secara terencana.
 
 ---
 
@@ -989,6 +990,8 @@ ddag_circuit_state
 - [ ] New metrics are registered in `internal/metrics/metrics_test.go`.
 - [ ] All call sites use the correct variable label count.
 - [ ] Grafana dashboard JSON uses only implemented metrics.
+- [ ] Any newly introduced Prometheus `counter` follows naming convention with suffix `_total`.
+- [ ] Renaming an existing counter requires a migration plan that preserves dashboard compatibility for at least one transition cycle (for example, query fallback old-name OR new-name).
 
 ---
 
