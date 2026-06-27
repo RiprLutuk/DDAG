@@ -44,3 +44,4 @@ apps/dashboard/dist/
 /cache-service
 /worker
 /migrate
+/scripts/loadtest*

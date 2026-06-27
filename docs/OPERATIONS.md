@@ -85,7 +85,7 @@ High-concurrency metrics:
 |---|---|
 | `ddag_cache_hits_total` / `ddag_cache_misses_total` | Gateway response-cache hit/miss counters by route |
 | `ddag_singleflight_active` | Active cache-fill calls protected by singleflight |
-| `ddag_singleflight_shared` | Requests that reused another in-flight cache fill |
+| `ddag_singleflight_shared_total` / `ddag_singleflight_shared` | Requests that reused another in-flight cache fill; legacy name retained during migration |
 | `ddag_metadata_sync_total` | Metadata refreshes triggered by Redis Pub/Sub |
 | `ddag_connector_requests_total` / `ddag_connector_errors_total` | Connector request/error counters by connection and DB type |
 | `ddag_circuit_state` | Circuit state by connection (`0=closed`, `1=half-open`, `2=open`) |

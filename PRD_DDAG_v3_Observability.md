@@ -110,7 +110,7 @@ Observability v3 sudah berjalan, tetapi belum production-ready untuk operasi har
    - `ddag_cache_fill_duration_seconds_bucket`
    - `ddag_invalid_token_total`
 6. Connector Oracle sudah ada di repo, tetapi belum tercakup di PRD lama.
-7. Ada minimal satu counter yang secara semantik benar tetapi belum mengikuti naming best-practice Prometheus, misalnya `ddag_singleflight_shared` (counter tanpa suffix `_total`). Ini tidak memblokir operasi, tetapi memunculkan warning/info di query tools dan sebaiknya dimigrasikan secara terencana.
+7. Counter `ddag_singleflight_shared` belum mengikuti naming best-practice Prometheus karena tidak memakai suffix `_total`. v3 harus expose nama canonical `ddag_singleflight_shared_total` sambil mempertahankan nama legacy selama minimal satu transition cycle.
 
 ---
 
@@ -164,6 +164,7 @@ ddag_token_issued_total
 ddag_token_failed_total
 ddag_token_revoked_total
 ddag_singleflight_active
+ddag_singleflight_shared_total
 ddag_singleflight_shared
 ddag_metadata_sync_total
 ddag_db_query_duration_seconds_bucket
@@ -204,7 +205,8 @@ ddag_rejected_requests_total
 | `ddag_token_failed_total` | none |
 | `ddag_token_revoked_total` | none |
 | `ddag_singleflight_active` | none |
-| `ddag_singleflight_shared` | none |
+| `ddag_singleflight_shared_total` | none |
+| `ddag_singleflight_shared` | none, legacy compatibility alias |
 | `ddag_metadata_sync_total` | none |
 | `ddag_db_query_duration_seconds_bucket` | `connection`, `db_type`, `le` |
 | `ddag_connector_requests_total` | `connection`, `db_type` |
@@ -317,7 +319,8 @@ Implemented metrics:
 ddag_cache_hits_total{service, route}
 ddag_cache_misses_total{service, route}
 ddag_singleflight_active{service}
-ddag_singleflight_shared{service}
+ddag_singleflight_shared_total{service}
+ddag_singleflight_shared{service} # legacy compatibility alias during migration
 ```
 
 Type: Counter + Gauge
@@ -354,7 +357,10 @@ ddag_singleflight_active{service="api-gateway"} or vector(0)
 ```
 
 ```promql
-rate(ddag_singleflight_shared{service="api-gateway"}[5m]) or vector(0)
+rate(ddag_singleflight_shared_total{service="api-gateway"}[5m])
+or
+rate(ddag_singleflight_shared{service="api-gateway"}[5m])
+or vector(0)
 ```
 
 Implementation requirement:
@@ -677,7 +683,7 @@ Acceptance criteria:
 |---|---|---|
 | Gateway | Queue accepted/timeouts/rejected | `ddag_queued_requests_total`, `ddag_queue_timeout_total`, `ddag_rejected_requests_total` |
 | Gateway | Queue depth by route | `ddag_queue_depth` |
-| Gateway | Singleflight active/shared | `ddag_singleflight_active`, `ddag_singleflight_shared` |
+| Gateway | Singleflight active/shared | `ddag_singleflight_active`, `ddag_singleflight_shared_total` with fallback to `ddag_singleflight_shared` |
 | DB | Pool pressure ratio | `ddag_db_pool_active`, `ddag_pool_max_connections` |
 | DB | Pool wait/timeout | `ddag_db_pool_wait_count`, `ddag_db_pool_timeout_count` |
 | Connector | Connector request rate | `ddag_connector_requests_total` |
@@ -955,6 +961,25 @@ Circuit state:
 ```promql
 ddag_circuit_state
 ```
+
+### 13.3 Load Test Diagnostics
+
+When running `scripts/loadtest.py` or `scripts/loadtest_k6.js`, status `502` and
+`503` must be treated as failures, not successful checks.
+
+Observed demo behavior with client `loadtest-1782525997`:
+
+| Symptom | Example Endpoint | Evidence | Diagnosis |
+|---|---|---|---|
+| `502 CONNECTOR_ERROR` | `/api/v1/postgres/transaksi/search?q=a&limit=5` | Gateway body: `{"code":"CONNECTOR_ERROR","message":"query failed"}` | Root failure is inside the connector query path. Inspect the published API SQL/query-builder metadata for PostgreSQL compatibility. |
+| `503 CIRCUIT_BREAKER_OPEN` | `/api/v1/postgres-aws/transaksi?limit=5` | Gateway body: `{"code":"CIRCUIT_BREAKER_OPEN","message":"Database connection temporarily unavailable (circuit open)"}` | Secondary symptom after repeated connector failures. Wait for breaker recovery, then fix the query/connection cause that opened the breaker. |
+
+Load-test scripts must therefore:
+
+- count only `2xx` responses as successful in summary success rate,
+- make k6 checks fail on non-`200` API responses,
+- capture a short error-body sample for failed requests so `CONNECTOR_ERROR` and
+  `CIRCUIT_BREAKER_OPEN` are visible without rerunning manual curl diagnostics.
 
 ---
 

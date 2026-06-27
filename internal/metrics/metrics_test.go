@@ -26,6 +26,7 @@ func TestV2MetricsAreRegistered(t *testing.T) {
 	for _, want := range []string{
 		"ddag_singleflight_active",
 		"ddag_singleflight_shared",
+		"ddag_singleflight_shared_total",
 		"ddag_metadata_sync_total",
 		"ddag_circuit_state",
 		"ddag_circuit_open_total",
@@ -35,6 +36,8 @@ func TestV2MetricsAreRegistered(t *testing.T) {
 			t.Fatalf("missing metric %s", want)
 		}
 	}
+	assertCounterValue(t, families, "ddag_singleflight_shared", 1)
+	assertCounterValue(t, families, "ddag_singleflight_shared_total", 1)
 }
 
 func TestV3MetricsAreRegistered(t *testing.T) {
@@ -140,4 +143,20 @@ func metricHasLabels(metric *dto.Metric, want map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func assertCounterValue(t *testing.T, families []*dto.MetricFamily, name string, want float64) {
+	t.Helper()
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if metric.GetCounter().GetValue() == want {
+				return
+			}
+		}
+		t.Fatalf("metric %s missing counter value %v", name, want)
+	}
+	t.Fatalf("missing metric %s", name)
 }

@@ -159,7 +159,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
       "targets": [
         { "expr": "ddag_singleflight_active{service=\"api-gateway\"} or vector(0)", "legendFormat": "active fills" },
-        { "expr": "rate(ddag_singleflight_shared{service=\"api-gateway\"}[5m]) or vector(0)", "legendFormat": "shared results/s" }
+        { "expr": "rate(ddag_singleflight_shared_total{service=\"api-gateway\"}[5m]) or rate(ddag_singleflight_shared{service=\"api-gateway\"}[5m]) or vector(0)", "legendFormat": "shared results/s" }
       ]
     }
   ]

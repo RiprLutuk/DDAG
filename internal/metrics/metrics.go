@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // Metrics holds every counter/histogram/gauge a DDAG service may emit. A single
@@ -35,7 +36,7 @@ type Metrics struct {
 	TokenRevoked prometheus.Counter
 
 	SingleflightActive prometheus.Gauge
-	SingleflightShared prometheus.Counter
+	SingleflightShared prometheus.Counter // increments canonical and legacy shared-result counters
 	MetadataSync       prometheus.Counter
 
 	QueryDuration     *prometheus.HistogramVec // by connection, db_type
@@ -66,6 +67,12 @@ func New(service string) *Metrics {
 	reg.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	f := promauto.With(reg)
 	labels := prometheus.Labels{"service": service}
+	singleflightSharedLegacy := f.NewCounter(prometheus.CounterOpts{
+		Name: "ddag_singleflight_shared", Help: "Shared singleflight results.", ConstLabels: labels,
+	})
+	singleflightSharedTotal := f.NewCounter(prometheus.CounterOpts{
+		Name: "ddag_singleflight_shared_total", Help: "Shared singleflight results.", ConstLabels: labels,
+	})
 
 	m := &Metrics{
 		reg: reg,
@@ -108,9 +115,7 @@ func New(service string) *Metrics {
 		SingleflightActive: f.NewGauge(prometheus.GaugeOpts{
 			Name: "ddag_singleflight_active", Help: "Active singleflight cache fills.", ConstLabels: labels,
 		}),
-		SingleflightShared: f.NewCounter(prometheus.CounterOpts{
-			Name: "ddag_singleflight_shared", Help: "Shared singleflight results.", ConstLabels: labels,
-		}),
+		SingleflightShared: dualCounter{primary: singleflightSharedTotal, legacy: singleflightSharedLegacy},
 		MetadataSync: f.NewCounter(prometheus.CounterOpts{
 			Name: "ddag_metadata_sync_total", Help: "Metadata sync events received via Pub/Sub.", ConstLabels: labels,
 		}),
@@ -173,6 +178,29 @@ func New(service string) *Metrics {
 	}
 	m.registerDefaultSeries(service)
 	return m
+}
+
+type dualCounter struct {
+	primary prometheus.Counter
+	legacy  prometheus.Counter
+}
+
+func (c dualCounter) Desc() *prometheus.Desc { return c.primary.Desc() }
+
+func (c dualCounter) Write(out *dto.Metric) error { return c.primary.Write(out) }
+
+func (c dualCounter) Describe(ch chan<- *prometheus.Desc) { c.primary.Describe(ch) }
+
+func (c dualCounter) Collect(ch chan<- prometheus.Metric) { c.primary.Collect(ch) }
+
+func (c dualCounter) Inc() {
+	c.primary.Inc()
+	c.legacy.Inc()
+}
+
+func (c dualCounter) Add(v float64) {
+	c.primary.Add(v)
+	c.legacy.Add(v)
 }
 
 func (m *Metrics) registerDefaultSeries(service string) {
