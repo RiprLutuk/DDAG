@@ -70,14 +70,23 @@ func sortedCopy(in map[string]any) map[string]any {
 
 // Get returns the cached bytes for a key and whether it was present.
 func (c *Cache) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	b, _, found, err := c.GetWithTTL(ctx, key)
+	return b, found, err
+}
+
+func (c *Cache) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, bool, error) {
 	b, err := c.rdb.Get(ctx, key).Bytes()
 	if err == redis.Nil {
-		return nil, false, nil
+		return nil, 0, false, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, 0, false, err
 	}
-	return b, true, nil
+	ttl, err := c.rdb.TTL(ctx, key).Result()
+	if err != nil || ttl < 0 {
+		ttl = 0
+	}
+	return b, ttl, true, nil
 }
 
 // Set stores bytes under a key with a TTL.

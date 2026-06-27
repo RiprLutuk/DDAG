@@ -23,13 +23,20 @@ const modalOpen = ref(false)
 const editing = ref<any>(null)
 const saving = ref(false)
 const testing = ref(false)
+const previewing = ref(false)
+const explaining = ref(false)
 const testRows = ref<any[] | null>(null)
 const testError = ref('')
+const previewResult = ref<any | null>(null)
+const previewError = ref('')
+const explainResult = ref<any | null>(null)
+const previewQueryString = ref('')
 const sampleParams = reactive<Record<string, any>>({})
 
 const blank = () => ({
   name: '', namespace: '', path: '', method: 'GET', description: '', database_connection_id: '',
   query_template: '', required_scope: '', default_limit: 100, max_limit: 1000,
+  response_mapping: null as any, query_builder_json: '',
   parameters: [] as any[],
 })
 const form = reactive<any>(blank())
@@ -51,17 +58,41 @@ onMounted(load)
 function openCreate() { Object.assign(form, blank()); editing.value = null; testRows.value = null; testError.value = ''; modalOpen.value = true }
 async function openEdit(row: any) {
   const a = await api.get(`/api/apis/${row.id}`)
-  Object.assign(form, { ...blank(), ...a, database_connection_id: a.database_connection_id || '', parameters: a.parameters || [] })
-  editing.value = row; testRows.value = null; testError.value = ''; modalOpen.value = true
+  const qb = a.response_mapping?.query_builder || null
+  Object.assign(form, { ...blank(), ...a, database_connection_id: a.database_connection_id || '', parameters: a.parameters || [], query_builder_json: qb ? JSON.stringify(qb, null, 2) : '' })
+  editing.value = row; testRows.value = null; testError.value = ''; previewResult.value = null; previewError.value = ''; explainResult.value = null; modalOpen.value = true
 }
 function addParam() { form.parameters.push({ name: '', source: 'path', param_type: 'string', required: true, max_length: null, default_value: null, validation_rule: null }) }
 function removeParam(i: number) { form.parameters.splice(i, 1) }
+
+function parseQueryString() {
+  const out: Record<string, string> = {}
+  const qs = previewQueryString.value.trim().replace(/^\?/, '')
+  if (!qs) return out
+  for (const [k, v] of new URLSearchParams(qs).entries()) out[k] = v
+  return out
+}
+
+function responseMapping() {
+  const raw = (form.query_builder_json || '').trim()
+  if (!raw) return null
+  const parsed = JSON.parse(raw)
+  return parsed.query_builder ? parsed : { query_builder: parsed }
+}
+
+function apiPayload() {
+  const payload: any = { ...form }
+  delete payload.query_builder_json
+  payload.response_mapping = responseMapping()
+  return payload
+}
 
 async function runTest() {
   testing.value = true; testRows.value = null; testError.value = ''
   try {
     const res = await api.post('/api/apis/test', {
       connection_id: form.database_connection_id, query_template: form.query_template,
+      response_mapping: responseMapping(), query: parseQueryString(),
       parameters: { ...sampleParams }, limit: form.default_limit,
     })
     if (res.success) testRows.value = res.rows || []
@@ -69,11 +100,30 @@ async function runTest() {
   } catch (e: any) { testError.value = e.message } finally { testing.value = false }
 }
 
+async function previewSQL() {
+  previewing.value = true; previewResult.value = null; previewError.value = ''
+  try {
+    previewResult.value = await api.post('/api/apis/preview', {
+      api: apiPayload(), query: parseQueryString(), parameters: { ...sampleParams },
+    })
+  } catch (e: any) { previewError.value = e.message } finally { previewing.value = false }
+}
+
+async function explainSQL() {
+  explaining.value = true; explainResult.value = null; previewError.value = ''
+  try {
+    explainResult.value = await api.post('/api/apis/explain', {
+      connection_id: form.database_connection_id, api: apiPayload(), query: parseQueryString(), parameters: { ...sampleParams },
+    })
+  } catch (e: any) { previewError.value = e.message } finally { explaining.value = false }
+}
+
 async function save() {
   saving.value = true
   try {
-    if (editing.value) await api.put(`/api/apis/${editing.value.id}`, form)
-    else await api.post('/api/apis', form)
+    const payload = apiPayload()
+    if (editing.value) await api.put(`/api/apis/${editing.value.id}`, payload)
+    else await api.post('/api/apis', payload)
     toast.success('API saved as draft')
     modalOpen.value = false; await load()
   } catch (e: any) { toast.error('Save failed', e.message) } finally { saving.value = false }
@@ -255,6 +305,10 @@ async function exportOpenAPI() {
       <label>Query Template <span class="faint">(use :param binding — never concatenate user input)</span></label>
       <textarea v-model="form.query_template" rows="5" placeholder="SELECT * FROM table WHERE id = :id"></textarea>
     </div>
+    <div class="field">
+      <label>Query Builder JSON</label>
+      <textarea v-model="form.query_builder_json" rows="6" placeholder='{"base_table":"karyawan","select":["karyawan.id","karyawan.nama"],"filters":[{"name":"status","column":"karyawan.status","operators":["eq","in"]}],"sortable_columns":[{"name":"nama","column":"karyawan.nama"}]}'></textarea>
+    </div>
 
     <div class="field">
       <label style="display:flex;justify-content:space-between;align-items:center">
@@ -267,6 +321,22 @@ async function exportOpenAPI() {
         <div class="field" style="margin:0;flex:0 0 auto"><label class="checkbox"><input v-model="p.required" type="checkbox" />req</label></div>
         <div class="field" style="margin:0"><input v-model.number="p.max_length" type="number" placeholder="maxlen" /></div>
         <button class="btn sm danger" type="button" @click="removeParam(i)">×</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:6px">
+      <div class="card-head">
+        <h3>SQL Preview</h3>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm ghost" @click="previewSQL" :disabled="previewing"><span v-if="previewing" class="spin" /> Preview</button>
+          <button class="btn sm" @click="explainSQL" :disabled="explaining"><span v-if="explaining" class="spin" /> Explain</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="field"><label>Sample Query</label><input v-model="previewQueryString" class="mono" placeholder="status=eq:active&sort=-created_at" /></div>
+        <p v-if="previewError" class="error-text">{{ previewError }}</p>
+        <pre v-if="previewResult" class="code-block">{{ JSON.stringify(previewResult, null, 2) }}</pre>
+        <pre v-if="explainResult" class="code-block">{{ JSON.stringify(explainResult, null, 2) }}</pre>
       </div>
     </div>
 

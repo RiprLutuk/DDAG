@@ -19,6 +19,17 @@ type entry struct {
 	version int
 }
 
+type PoolSnapshot struct {
+	ConnectionID   string `json:"connection_id"`
+	InUse          int    `json:"in_use"`
+	Idle           int    `json:"idle"`
+	Total          int    `json:"total"`
+	Max            int    `json:"max"`
+	WaitCount      int64  `json:"wait_count"`
+	WaitDurationMS int64  `json:"wait_duration_ms"`
+	TimeoutCount   int64  `json:"timeout_count"`
+}
+
 // Registry owns the live connectors.
 type Registry struct {
 	mu      sync.Mutex
@@ -87,7 +98,32 @@ func (r *Registry) PublishStats() {
 		r.metrics.PoolInUse.WithLabelValues(id).Set(float64(s.InUse))
 		r.metrics.PoolIdle.WithLabelValues(id).Set(float64(s.Idle))
 		r.metrics.PoolMax.WithLabelValues(id).Set(float64(s.Max))
+		r.metrics.DBPoolActive.WithLabelValues(id).Set(float64(s.InUse))
+		r.metrics.DBPoolIdle.WithLabelValues(id).Set(float64(s.Idle))
+		r.metrics.DBPoolWaitCount.WithLabelValues(id).Set(float64(s.WaitCount))
+		r.metrics.DBPoolWaitMS.WithLabelValues(id).Set(float64(s.WaitDurationMS))
+		r.metrics.DBPoolTimeouts.WithLabelValues(id).Set(float64(s.TimeoutCount))
 	}
+}
+
+func (r *Registry) Snapshot() []PoolSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]PoolSnapshot, 0, len(r.entries))
+	for id, e := range r.entries {
+		s := e.conn.Stats()
+		out = append(out, PoolSnapshot{
+			ConnectionID:   id,
+			InUse:          s.InUse,
+			Idle:           s.Idle,
+			Total:          s.Total,
+			Max:            s.Max,
+			WaitCount:      s.WaitCount,
+			WaitDurationMS: s.WaitDurationMS,
+			TimeoutCount:   s.TimeoutCount,
+		})
+	}
+	return out
 }
 
 // StartStatsLoop publishes pool stats on an interval until ctx is cancelled.

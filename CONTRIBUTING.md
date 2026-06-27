@@ -50,7 +50,7 @@ CI runs the same checks on every PR.
 
 - Live integration tests for `connector-mysql`, `connector-oracle`,
   `connector-sqlserver` (a docker-compose with sample source DBs would be great).
-- Approval workflow for API publishing (PRD §7.2).
+- Approval workflow for API publishing.
 - Embedded Swagger UI page in the dashboard rendering the exported OpenAPI spec.
 - Additional Grafana panels / alerting rules.
 

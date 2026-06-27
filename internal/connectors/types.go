@@ -53,9 +53,13 @@ type QueryResult struct {
 
 // PoolStats reports live pool utilization for metrics.
 type PoolStats struct {
-	InUse int
-	Idle  int
-	Max   int
+	InUse          int
+	Idle           int
+	Total          int
+	Max            int
+	WaitCount      int64
+	WaitDurationMS int64
+	TimeoutCount   int64
 }
 
 // Connector is a live, pooled connection to one source database.

@@ -28,17 +28,18 @@ import (
 )
 
 type service struct {
-	cfg       config.Config
-	store     *store.Store
-	router    *gateway.Router
-	jwks      *jwksCache
-	cache     *cache.Cache
-	limiter   *policy.RateLimiter
-	connector *gateway.ConnectorClient
-	metrics   *metrics.Metrics
-	audit     *audit.Recorder
-	log       *logging.Logger
-	flights   *flightGroup
+	cfg          config.Config
+	store        *store.Store
+	router       *gateway.Router
+	jwks         *jwksCache
+	cache        *cache.Cache
+	limiter      *policy.RateLimiter
+	connector    *gateway.ConnectorClient
+	metrics      *metrics.Metrics
+	audit        *audit.Recorder
+	log          *logging.Logger
+	flights      *flightGroup
+	backpressure *backpressureManager
 
 	trustedProxies []netip.Prefix
 
@@ -79,6 +80,7 @@ func Run() error {
 		audit:          audit.New(store.New(pool)),
 		log:            log,
 		flights:        newFlightGroup(),
+		backpressure:   newBackpressureManager(cfg.Gateway.BackpressureSize, cfg.Gateway.BackpressureTimeout),
 		trustedProxies: trustedProxies,
 	}
 
@@ -257,9 +259,9 @@ func (s *service) serve(w http.ResponseWriter, r *http.Request) {
 	// 2. Scope.
 	if !policy.HasScope(claims.Scope, api.RequiredScope) {
 		s.metrics.Forbidden.Inc()
-		rlog.status, rlog.errCode = http.StatusForbidden, httpx.CodeForbidden
+		rlog.status, rlog.errCode = http.StatusForbidden, httpx.CodeScopeForbidden
 		s.recordSecurity(r, "forbidden_request", claims.ClientID, api.ID.String())
-		httpx.ErrorCode(w, r, httpx.CodeForbidden, "Token scope does not grant access to this API")
+		httpx.ErrorCode(w, r, httpx.CodeScopeForbidden, "Token scope does not grant access to this API")
 		return
 	}
 
@@ -314,6 +316,12 @@ func (s *service) serve(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, apiErr)
 		return
 	}
+	built, apiErr := gateway.BuildDynamicQuery(api, r.URL.Query(), params)
+	if apiErr != nil {
+		rlog.status, rlog.errCode = apiErr.HTTPStatus(), apiErr.Code
+		httpx.Error(w, r, apiErr)
+		return
+	}
 
 	effLimit, offset, page := s.pagination(r, api)
 	isList := api.MaxLimit != 1
@@ -322,19 +330,20 @@ func (s *service) serve(w http.ResponseWriter, r *http.Request) {
 	cr, hasCR := s.cacheRuleFor(api.ID)
 	cacheEnabled := hasCR && cr.Enabled
 	var cacheKey string
+	cacheParams := cacheVariantParams(built.Params, r.URL.Query(), effLimit, offset)
 	if cacheEnabled {
-		cacheKey = cache.Key(api.ID, client.ClientID, cr.VaryByClient, params)
-		if b, found, _ := s.cache.Get(r.Context(), cacheKey); found {
+		cacheKey = cache.Key(api.ID, client.ClientID, cr.VaryByClient, cacheParams)
+		if b, ttl, found, _ := s.cache.GetWithTTL(r.Context(), cacheKey); found {
 			s.metrics.CacheHits.WithLabelValues(api.Path).Inc()
 			rlog.cached, rlog.status = true, http.StatusOK
-			s.writeCached(w, r, b, start)
+			s.writeCachedWithTTL(w, r, b, start, ttl)
 			return
 		}
 		s.metrics.CacheMisses.WithLabelValues(api.Path).Inc()
 	}
 
 	// 8. Connector dispatch, singleflight-protected when a cache key exists.
-	result, apiErr := s.resolvePayload(r, api, params, effLimit, offset, page, isList, cacheEnabled, cacheKey, cr)
+	result, apiErr := s.resolvePayload(r, api, built.SQL, built.Params, effLimit, offset, page, isList, cacheEnabled, cacheKey, cr)
 	if apiErr != nil {
 		rlog.status, rlog.errCode = apiErr.HTTPStatus(), apiErr.Code
 		httpx.Error(w, r, apiErr)
@@ -431,15 +440,30 @@ func (s *service) effectiveLimit(r *http.Request, api models.APIDefinition) int 
 	return limit
 }
 
-func (s *service) resolvePayload(r *http.Request, api models.APIDefinition, params map[string]any, limit, offset, page int, isList, cacheEnabled bool, cacheKey string, cr models.CacheRule) (connectorPayload, *httpx.APIError) {
+func (s *service) resolvePayload(r *http.Request, api models.APIDefinition, queryTemplate string, params map[string]any, limit, offset, page int, isList, cacheEnabled bool, cacheKey string, cr models.CacheRule) (connectorPayload, *httpx.APIError) {
 	load := func() (connectorPayload, *httpx.APIError) {
 		if api.DatabaseConnectionID == nil {
 			return connectorPayload{}, httpx.NewError(httpx.CodeInternal, "API has no database connection configured")
 		}
+		queueKey := api.ID.String() + ":" + api.ConnectorType
+		s.metrics.QueueDepth.WithLabelValues(api.Path).Set(float64(s.backpressure.Depth(queueKey)))
+		release, ok := s.backpressure.Acquire(r.Context(), queueKey)
+		if !ok {
+			s.metrics.QueueTimeout.WithLabelValues(api.Path).Inc()
+			s.metrics.RejectedRequests.WithLabelValues(api.Path).Inc()
+			s.metrics.QueueDepth.WithLabelValues(api.Path).Set(float64(s.backpressure.Depth(queueKey)))
+			return connectorPayload{}, httpx.NewError(httpx.CodeBackpressureLimit, "Too many concurrent requests. Please retry later.")
+		}
+		s.metrics.QueuedRequests.WithLabelValues(api.Path).Inc()
+		s.metrics.QueueDepth.WithLabelValues(api.Path).Set(float64(s.backpressure.Depth(queueKey)))
+		defer func() {
+			release()
+			s.metrics.QueueDepth.WithLabelValues(api.Path).Set(float64(s.backpressure.Depth(queueKey)))
+		}()
 		connResp, apiErr := s.connector.Query(r.Context(), api.ConnectorType, gateway.ConnectorRequest{
 			RequestID:     httpx.RequestID(r.Context()),
 			ConnectionID:  api.DatabaseConnectionID.String(),
-			QueryTemplate: api.QueryTemplate,
+			QueryTemplate: queryTemplate,
 			Parameters:    params,
 			TimeoutMS:     0,
 			Limit:         limit,
@@ -498,6 +522,21 @@ func (s *service) readBody(r *http.Request) map[string]any {
 		return nil
 	}
 	return body
+}
+
+func cacheVariantParams(params map[string]any, query map[string][]string, limit, offset int) map[string]any {
+	out := make(map[string]any, len(params)+len(query)+2)
+	for k, v := range params {
+		out[k] = v
+	}
+	out["ddag_limit"] = limit
+	out["ddag_offset"] = offset
+	for k, vs := range query {
+		if len(vs) > 0 {
+			out["query_"+k] = strings.Join(vs, ",")
+		}
+	}
+	return out
 }
 
 func (s *service) recordSecurity(r *http.Request, action, clientID, apiID string) {

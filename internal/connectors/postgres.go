@@ -125,9 +125,13 @@ func (c *pgConnector) HealthCheck(ctx context.Context) error {
 func (c *pgConnector) Stats() PoolStats {
 	s := c.pool.Stat()
 	return PoolStats{
-		InUse: int(s.AcquiredConns()),
-		Idle:  int(s.IdleConns()),
-		Max:   int(s.MaxConns()),
+		InUse:          int(s.AcquiredConns()),
+		Idle:           int(s.IdleConns()),
+		Total:          int(s.TotalConns()),
+		Max:            int(s.MaxConns()),
+		WaitCount:      s.EmptyAcquireCount(),
+		WaitDurationMS: s.AcquireDuration().Milliseconds(),
+		TimeoutCount:   s.CanceledAcquireCount(),
 	}
 }
 

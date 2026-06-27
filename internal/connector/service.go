@@ -85,6 +85,7 @@ func Run(dbType string) error {
 	mux.HandleFunc("POST /query", svc.handleQuery)
 	mux.HandleFunc("POST /test", svc.handleTest)
 	mux.HandleFunc("GET /circuits", svc.handleCircuits)
+	mux.HandleFunc("GET /pools", svc.handlePools)
 
 	return server.Service{
 		Name: serviceName, Addr: cfg.HTTPAddr, Handler: mux, Logger: log, Metrics: m,
@@ -133,14 +134,15 @@ func (s *service) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if conn.Status != "active" {
-		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeSourceDBUnavailable, "connection is disabled")
+		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeConnectorUnavailable, "connection is disabled")
 		return
 	}
+	s.metrics.ConnectorRequests.WithLabelValues(conn.ID.String(), s.dbType).Inc()
 	breaker := s.breakerFor(conn.ID.String())
 	prevState := breaker.State()
 	if !breaker.Allow(time.Now()) {
 		s.observeCircuit(conn.ID.String(), breaker, prevState)
-		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeSourceDBUnavailable, "Database connection temporarily unavailable (circuit open)", string(breaker.State()))
+		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeCircuitBreakerOpen, "Database connection temporarily unavailable (circuit open)", string(breaker.State()))
 		return
 	}
 	s.observeCircuit(conn.ID.String(), breaker, prevState)
@@ -160,7 +162,8 @@ func (s *service) handleQuery(w http.ResponseWriter, r *http.Request) {
 		s.observeCircuit(conn.ID.String(), breaker, prevState)
 		s.metrics.ConnectorErr.WithLabelValues(conn.ID.String(), s.dbType).Inc()
 		s.log.Error("pool_acquire_failed", "connection", conn.Name, "error", err.Error())
-		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeSourceDBUnavailable, "source database unavailable", string(breaker.State()))
+		code, status := classifyPoolErr(err)
+		s.writeErr(w, status, code, safePoolMessage(code), string(breaker.State()))
 		return
 	}
 
@@ -207,6 +210,16 @@ func (s *service) handleCircuits(w http.ResponseWriter, r *http.Request) {
 	}
 	s.breakerMu.Unlock()
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": out})
+}
+
+func (s *service) handlePools(w http.ResponseWriter, r *http.Request) {
+	if s.internalAuthSecret != "" {
+		if err := internalauth.VerifyHeaders(r, nil, s.internalAuthSecret, time.Now(), time.Minute); err != nil {
+			s.writeErr(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid internal service signature")
+			return
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": s.registry.Snapshot()})
 }
 
 // handleTest tests connectivity using the provided (unsaved) parameters so the
@@ -355,11 +368,34 @@ func classifyQueryErr(err error) (code string, status int) {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "context deadline exceeded"), strings.Contains(msg, "timeout"):
-		return httpx.CodeQueryTimeout, http.StatusRequestTimeout
+		return httpx.CodeDBQueryTimeout, http.StatusRequestTimeout
 	case strings.Contains(msg, "missing value for parameter"):
-		return httpx.CodeBadRequest, http.StatusBadRequest
+		return httpx.CodeQueryValidationFailed, http.StatusBadRequest
 	default:
 		return httpx.CodeConnectorError, http.StatusBadGateway
+	}
+}
+
+func classifyPoolErr(err error) (code string, status int) {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "timeout"):
+		return httpx.CodeDBConnectTimeout, http.StatusGatewayTimeout
+	case strings.Contains(msg, "too many"), strings.Contains(msg, "pool") && strings.Contains(msg, "acquire"):
+		return httpx.CodeDBPoolExhausted, http.StatusServiceUnavailable
+	default:
+		return httpx.CodeConnectorUnavailable, http.StatusBadGateway
+	}
+}
+
+func safePoolMessage(code string) string {
+	switch code {
+	case httpx.CodeDBConnectTimeout:
+		return "Database connection timed out. Please retry later."
+	case httpx.CodeDBPoolExhausted:
+		return "Database connection pool is full. Please retry later."
+	default:
+		return "Connector or source database unavailable"
 	}
 }
 

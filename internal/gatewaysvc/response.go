@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ddag/ddag/internal/gateway"
@@ -47,6 +48,11 @@ type connectorPayload struct {
 }
 
 func (s *service) writePayload(w http.ResponseWriter, r *http.Request, p payload, cached bool, start time.Time, sourceMS int64) {
+	if cached {
+		w.Header().Set("X-Cache", "HIT")
+	} else {
+		w.Header().Set("X-Cache", "MISS")
+	}
 	meta := &httpx.Meta{Cached: cached, DurationMS: time.Since(start).Milliseconds(), CircuitState: p.CircuitState}
 	if p.Pagination != nil {
 		httpx.WriteJSON(w, http.StatusOK, httpx.ListEnvelope{
@@ -62,6 +68,14 @@ func (s *service) writePayload(w http.ResponseWriter, r *http.Request, p payload
 }
 
 func (s *service) writeCached(w http.ResponseWriter, r *http.Request, b []byte, start time.Time) {
+	s.writeCachedWithTTL(w, r, b, start, 0)
+}
+
+func (s *service) writeCachedWithTTL(w http.ResponseWriter, r *http.Request, b []byte, start time.Time, ttl time.Duration) {
+	w.Header().Set("X-Cache", "HIT")
+	if ttl > 0 {
+		w.Header().Set("X-Cache-TTL", strconv.FormatInt(int64(ttl.Seconds()), 10))
+	}
 	var p payload
 	if err := json.Unmarshal(b, &p); err != nil {
 		// Corrupt cache entry: fall back to an empty success rather than failing.

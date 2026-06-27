@@ -37,14 +37,25 @@ type Metrics struct {
 	SingleflightShared prometheus.Counter
 	MetadataSync       prometheus.Counter
 
-	QueryDuration   *prometheus.HistogramVec // by connection, db_type
-	ConnectorErr    *prometheus.CounterVec   // by connection, db_type
-	CircuitState    *prometheus.GaugeVec     // by connection, db_type
-	CircuitOpen     *prometheus.CounterVec   // by connection, db_type
-	CircuitHalfOpen *prometheus.CounterVec   // by connection, db_type
-	PoolInUse       *prometheus.GaugeVec     // by connection
-	PoolIdle        *prometheus.GaugeVec     // by connection
-	PoolMax         *prometheus.GaugeVec     // by connection
+	QueryDuration     *prometheus.HistogramVec // by connection, db_type
+	ConnectorRequests *prometheus.CounterVec   // by connection, db_type
+	ConnectorErr      *prometheus.CounterVec   // by connection, db_type
+	CircuitState      *prometheus.GaugeVec     // by connection, db_type
+	CircuitOpen       *prometheus.CounterVec   // by connection, db_type
+	CircuitHalfOpen   *prometheus.CounterVec   // by connection, db_type
+	PoolInUse         *prometheus.GaugeVec     // by connection
+	PoolIdle          *prometheus.GaugeVec     // by connection
+	PoolMax           *prometheus.GaugeVec     // by connection
+	DBPoolActive      *prometheus.GaugeVec     // by connection
+	DBPoolIdle        *prometheus.GaugeVec     // by connection
+	DBPoolWaitCount   *prometheus.GaugeVec     // by connection
+	DBPoolWaitMS      *prometheus.GaugeVec     // by connection
+	DBPoolTimeouts    *prometheus.GaugeVec     // by connection
+
+	QueuedRequests   *prometheus.CounterVec // by route/api
+	QueueDepth       *prometheus.GaugeVec   // by route/api
+	QueueTimeout     *prometheus.CounterVec // by route/api
+	RejectedRequests *prometheus.CounterVec // by route/api
 }
 
 // New creates and registers the DDAG metric set for the given service.
@@ -107,6 +118,9 @@ func New(service string) *Metrics {
 			ConstLabels: labels,
 			Buckets:     []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
 		}, []string{"connection", "db_type"}),
+		ConnectorRequests: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_connector_requests_total", Help: "Connector requests.", ConstLabels: labels,
+		}, []string{"connection", "db_type"}),
 		ConnectorErr: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "ddag_connector_errors_total", Help: "Connector errors.", ConstLabels: labels,
 		}, []string{"connection", "db_type"}),
@@ -128,6 +142,33 @@ func New(service string) *Metrics {
 		PoolMax: f.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "ddag_pool_max_connections", Help: "Configured max pool connections.", ConstLabels: labels,
 		}, []string{"connection"}),
+		DBPoolActive: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ddag_db_pool_active", Help: "Active source DB pool connections.", ConstLabels: labels,
+		}, []string{"connection"}),
+		DBPoolIdle: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ddag_db_pool_idle", Help: "Idle source DB pool connections.", ConstLabels: labels,
+		}, []string{"connection"}),
+		DBPoolWaitCount: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ddag_db_pool_wait_count", Help: "Source DB pool wait count.", ConstLabels: labels,
+		}, []string{"connection"}),
+		DBPoolWaitMS: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ddag_db_pool_wait_duration_ms", Help: "Source DB pool cumulative wait duration in milliseconds.", ConstLabels: labels,
+		}, []string{"connection"}),
+		DBPoolTimeouts: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ddag_db_pool_timeout_count", Help: "Source DB pool timeout/canceled acquire count.", ConstLabels: labels,
+		}, []string{"connection"}),
+		QueuedRequests: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_queued_requests_total", Help: "Requests accepted into gateway backpressure queue.", ConstLabels: labels,
+		}, []string{"route"}),
+		QueueDepth: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ddag_queue_depth", Help: "Current gateway backpressure queue depth.", ConstLabels: labels,
+		}, []string{"route"}),
+		QueueTimeout: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_queue_timeout_total", Help: "Gateway backpressure queue timeout events.", ConstLabels: labels,
+		}, []string{"route"}),
+		RejectedRequests: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_rejected_requests_total", Help: "Requests rejected by gateway backpressure.", ConstLabels: labels,
+		}, []string{"route"}),
 	}
 	return m
 }

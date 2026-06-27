@@ -3,17 +3,20 @@ definePageMeta({ title: 'Monitoring' })
 const api = useApi()
 const data = ref<any>(null)
 const circuits = ref<any[]>([])
+const pools = ref<any[]>([])
 const loading = ref(true)
 
 async function load() {
   loading.value = true
   try {
-    const [overview, circuitRows] = await Promise.all([
+    const [overview, circuitRows, poolRows] = await Promise.all([
       api.get('/api/overview'),
       api.get('/api/circuit-breakers').catch(() => []),
+      api.get('/api/pool-stats').catch(() => []),
     ])
     data.value = overview
     circuits.value = circuitRows || []
+    pools.value = poolRows || []
   } finally { loading.value = false }
 }
 onMounted(load)
@@ -72,15 +75,16 @@ const pct = (n: number) => `${(n ?? 0).toFixed(1)}%`
         </table></div>
       </div>
       <div class="card">
-        <div class="card-head"><h3>Observability Endpoints</h3></div>
-        <div class="card-body">
-          <div class="kv">
-            <div class="k">Metrics</div><div><span class="mono">GET /metrics</span> on every service (Prometheus)</div>
-            <div class="k">Liveness</div><div><span class="mono">GET /healthz</span></div>
-            <div class="k">Readiness</div><div><span class="mono">GET /readyz</span></div>
-            <div class="k">Dashboards</div><div>Grafana templates: Overview, Traffic, Latency, Errors, Cache, Connectors, Security</div>
-          </div>
-        </div>
+        <div class="card-head"><h3>Pool Usage</h3></div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Connection</th><th>Active</th><th>Idle</th><th>Max</th><th>Wait</th><th>Timeout</th></tr></thead>
+          <tbody>
+            <tr v-for="p in pools" :key="p.connection_id">
+              <td>{{ p.connection }}</td><td>{{ p.in_use }}</td><td>{{ p.idle }}</td><td>{{ p.max }}</td><td>{{ p.wait_count }}</td><td>{{ p.timeout_count }}</td>
+            </tr>
+            <tr v-if="!pools.length"><td colspan="6" class="faint">No active pools</td></tr>
+          </tbody>
+        </table></div>
       </div>
     </div>
   </div>

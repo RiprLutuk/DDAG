@@ -39,12 +39,16 @@ container/Kubernetes deployment.
   circuit breakers, trusted proxy IP handling, configurable rate-limit fail mode,
   service-to-service HMAC auth, JWT audience validation, CSRF-protected
   dashboard sessions, and generated OpenAPI.
+- **v3 query readiness** — optional safe query-builder metadata supports
+  whitelisted filters, sorting, inner/left joins, SQL preview, explain, and
+  gateway backpressure for burst traffic.
 - **Security by default** — parameter binding only (no string concatenation),
   read-only queries unless explicitly flagged, secrets envelope-encrypted at rest
   and redacted from logs, append-only audit log enforced in the database.
 - **Observability from day one** — every service exposes `/metrics`, `/healthz`,
   `/readyz`; Prometheus scrape config and a Grafana dashboard are included,
-  including singleflight, metadata-sync, and circuit-breaker metrics.
+  including singleflight, metadata-sync, circuit-breaker, pool, cache, and queue
+  metrics.
 
 ---
 
@@ -213,15 +217,14 @@ make dashboard  # run the Nuxt dashboard dev server
 - Gateway-to-connector calls are HMAC-signed when `DDAG_INTERNAL_AUTH_SECRET` is
   configured; connectors reject unsigned internal requests in that mode.
 
-Open questions and post-MVP items are tracked against the [PRD](PRD.md).
-
 ---
 
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — services, data flow, internals
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — deploy, configure, run, troubleshoot
-- [PRD.md](PRD.md) — the product requirements this implements
+- [docs/DEPLOY_VPS.md](docs/DEPLOY_VPS.md) — single-VPS systemd + Caddy runbook
+- [docs/TESTING_V3.md](docs/TESTING_V3.md) — v3 load-test scripts and reports
 
 ---
 

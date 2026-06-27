@@ -17,6 +17,10 @@
 # Go
 /vendor/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Node / Nuxt
 node_modules/
 apps/dashboard/.nuxt/

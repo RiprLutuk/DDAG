@@ -43,8 +43,9 @@ type ListEnvelope struct {
 
 // ErrorBody is the error detail object.
 type ErrorBody struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // ErrorEnvelope is the standard error response.

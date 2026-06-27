@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/ddag/ddag/internal/gateway"
@@ -47,6 +48,7 @@ type apiInput struct {
 	Description          string                `json:"description"`
 	DatabaseConnectionID string                `json:"database_connection_id"`
 	QueryTemplate        string                `json:"query_template"`
+	ResponseMapping      json.RawMessage       `json:"response_mapping"`
 	RequiredScope        string                `json:"required_scope"`
 	DefaultLimit         int                   `json:"default_limit"`
 	MaxLimit             int                   `json:"max_limit"`
@@ -76,7 +78,7 @@ func (s *service) createAPI(w http.ResponseWriter, r *http.Request) {
 	a := &models.APIDefinition{
 		Name: in.Name, Namespace: in.Namespace, Path: in.Path, Method: in.Method,
 		Description: in.Description, DatabaseConnectionID: &connID, ConnectorType: conn.DatabaseType,
-		QueryTemplate: in.QueryTemplate, Status: "DRAFT", RequiredScope: in.RequiredScope,
+		QueryTemplate: in.QueryTemplate, ResponseMapping: in.ResponseMapping, Status: "DRAFT", RequiredScope: in.RequiredScope,
 		DefaultLimit: defInt(in.DefaultLimit, 100), MaxLimit: defInt(in.MaxLimit, 1000), CreatedBy: &actor,
 	}
 	id, err := s.store.CreateAPI(r.Context(), a)
@@ -113,7 +115,7 @@ func (s *service) updateAPI(w http.ResponseWriter, r *http.Request) {
 	a := &models.APIDefinition{
 		ID: id, Name: in.Name, Namespace: in.Namespace, Path: in.Path, Method: in.Method,
 		Description: in.Description, DatabaseConnectionID: &connID, ConnectorType: conn.DatabaseType,
-		QueryTemplate: in.QueryTemplate, RequiredScope: in.RequiredScope,
+		QueryTemplate: in.QueryTemplate, ResponseMapping: in.ResponseMapping, RequiredScope: in.RequiredScope,
 		DefaultLimit: defInt(in.DefaultLimit, 100), MaxLimit: defInt(in.MaxLimit, 1000),
 	}
 	if err := s.store.UpdateAPI(r.Context(), a); err != nil {
@@ -191,10 +193,12 @@ func (s *service) setAPIStatusHandler(status, action string) http.HandlerFunc {
 // safety before execution.
 func (s *service) testQuery(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ConnectionID  string         `json:"connection_id"`
-		QueryTemplate string         `json:"query_template"`
-		Parameters    map[string]any `json:"parameters"`
-		Limit         int            `json:"limit"`
+		ConnectionID    string            `json:"connection_id"`
+		QueryTemplate   string            `json:"query_template"`
+		ResponseMapping json.RawMessage   `json:"response_mapping"`
+		Parameters      map[string]any    `json:"parameters"`
+		Query           map[string]string `json:"query"`
+		Limit           int               `json:"limit"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -209,15 +213,112 @@ func (s *service) testQuery(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorCode(w, r, httpx.CodeValidation, "connection not found")
 		return
 	}
+	q := url.Values{}
+	for k, v := range req.Query {
+		q.Set(k, v)
+	}
+	built, apiErr := gateway.BuildDynamicQuery(models.APIDefinition{
+		QueryTemplate:   req.QueryTemplate,
+		ResponseMapping: req.ResponseMapping,
+		DefaultLimit:    defInt(req.Limit, 50),
+		MaxLimit:        defInt(req.Limit, 50),
+	}, q, req.Parameters)
+	if apiErr != nil {
+		httpx.Error(w, r, apiErr)
+		return
+	}
 	res, err := s.callConnectorQuery(r.Context(), conn.DatabaseType, map[string]any{
 		"request_id":     httpx.RequestID(r.Context()),
 		"connection_id":  connID.String(),
-		"query_template": req.QueryTemplate,
-		"parameters":     req.Parameters,
+		"query_template": built.SQL,
+		"parameters":     built.Params,
 		"limit":          defInt(req.Limit, 50),
 	})
 	if err != nil {
 		httpx.ErrorCode(w, r, httpx.CodeConnectorError, "connector unavailable for "+conn.DatabaseType)
+		return
+	}
+	ok(w, r, res)
+}
+
+func (s *service) previewQuery(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		API        apiInput          `json:"api"`
+		Query      map[string]string `json:"query"`
+		Parameters map[string]any    `json:"parameters"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	q := url.Values{}
+	for k, v := range req.Query {
+		q.Set(k, v)
+	}
+	a := models.APIDefinition{
+		Name: req.API.Name, Method: req.API.Method, Path: req.API.Path,
+		QueryTemplate: req.API.QueryTemplate, ResponseMapping: req.API.ResponseMapping,
+		DefaultLimit: defInt(req.API.DefaultLimit, 100), MaxLimit: defInt(req.API.MaxLimit, 1000),
+	}
+	built, apiErr := gateway.BuildDynamicQuery(a, q, req.Parameters)
+	if apiErr != nil {
+		httpx.Error(w, r, apiErr)
+		return
+	}
+	_, builderEnabled, _ := gateway.QueryBuilderFromAPI(a)
+	ok(w, r, map[string]any{
+		"sql":             built.SQL,
+		"parameters":      built.Params,
+		"builder_enabled": builderEnabled,
+	})
+}
+
+func (s *service) explainQuery(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ConnectionID string            `json:"connection_id"`
+		API          apiInput          `json:"api"`
+		Query        map[string]string `json:"query"`
+		Parameters   map[string]any    `json:"parameters"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	connID, err := uuid.Parse(req.ConnectionID)
+	if err != nil {
+		httpx.ErrorCode(w, r, httpx.CodeValidation, "valid connection_id is required")
+		return
+	}
+	conn, err := s.store.GetConnection(r.Context(), connID)
+	if err != nil {
+		httpx.ErrorCode(w, r, httpx.CodeValidation, "connection not found")
+		return
+	}
+	if conn.DatabaseType != "postgres" && conn.DatabaseType != "mysql" {
+		httpx.ErrorCode(w, r, httpx.CodeQueryValidationFailed, "explain is supported for PostgreSQL and MySQL in v3")
+		return
+	}
+	q := url.Values{}
+	for k, v := range req.Query {
+		q.Set(k, v)
+	}
+	a := models.APIDefinition{
+		Name: req.API.Name, Method: req.API.Method, Path: req.API.Path,
+		QueryTemplate: req.API.QueryTemplate, ResponseMapping: req.API.ResponseMapping,
+		DefaultLimit: defInt(req.API.DefaultLimit, 100), MaxLimit: defInt(req.API.MaxLimit, 1000),
+	}
+	built, apiErr := gateway.BuildDynamicQuery(a, q, req.Parameters)
+	if apiErr != nil {
+		httpx.Error(w, r, apiErr)
+		return
+	}
+	res, err := s.callConnectorQuery(r.Context(), conn.DatabaseType, map[string]any{
+		"request_id":     httpx.RequestID(r.Context()),
+		"connection_id":  connID.String(),
+		"query_template": "EXPLAIN " + built.SQL,
+		"parameters":     built.Params,
+		"limit":          50,
+	})
+	if err != nil {
+		httpx.ErrorCode(w, r, httpx.CodeConnectorUnavailable, "connector unavailable for "+conn.DatabaseType)
 		return
 	}
 	ok(w, r, res)

@@ -90,7 +90,14 @@ func (c *sqlConnector) HealthCheck(ctx context.Context) error {
 
 func (c *sqlConnector) Stats() PoolStats {
 	s := c.db.Stats()
-	return PoolStats{InUse: s.InUse, Idle: s.Idle, Max: s.MaxOpenConnections}
+	return PoolStats{
+		InUse:          s.InUse,
+		Idle:           s.Idle,
+		Total:          s.OpenConnections,
+		Max:            s.MaxOpenConnections,
+		WaitCount:      s.WaitCount,
+		WaitDurationMS: s.WaitDuration.Milliseconds(),
+	}
 }
 
 func (c *sqlConnector) Close() { _ = c.db.Close() }

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -20,6 +21,15 @@ var writeStmt = regexp.MustCompile(`(?is)^\s*(insert|update|delete|merge|truncat
 //   - parameters are bound (the presence of :params), never concatenated
 //   - list/search endpoints have a row limit available (default_limit > 0)
 func ValidateForPublish(api models.APIDefinition, params []models.APIParameter) error {
+	if _, ok, apiErr := QueryBuilderFromAPI(api); apiErr != nil {
+		return errors.New(apiErr.Message)
+	} else if ok {
+		if api.DefaultLimit <= 0 {
+			return fmt.Errorf("default_limit must be greater than zero")
+		}
+		return nil
+	}
+
 	q := strings.TrimSpace(api.QueryTemplate)
 	if q == "" {
 		return fmt.Errorf("query template is empty")

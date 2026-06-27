@@ -12,7 +12,7 @@ with defaults is in [configs/.env.example](../configs/.env.example). Key groups:
 | Secrets | `DDAG_MASTER_KEY` (base64 of 32 bytes — `openssl rand -base64 32`) |
 | OAuth2 | `DDAG_TOKEN_ISSUER`, `DDAG_TOKEN_AUDIENCE`, `DDAG_TOKEN_CLOCK_SKEW`, `DDAG_ACCESS_TOKEN_TTL`, `DDAG_REFRESH_TOKEN_TTL`, `DDAG_JWKS_URL`, `DDAG_JWKS_REFRESH` |
 | Dashboard session | `DDAG_SESSION_SECRET`, `DDAG_SESSION_TTL`, `DDAG_SESSION_COOKIE_SECURE`, `DDAG_MAX_FAILED_LOGIN`, `DDAG_LOCKOUT_WINDOW`, `DDAG_DASHBOARD_ORIGINS` |
-| Gateway | `DDAG_POLICY_MODE`, `DDAG_CACHE_MODE`, `DDAG_ROUTE_REFRESH`, `DDAG_DEFAULT_LIMIT`, `DDAG_MAX_LIMIT`, `DDAG_TRUSTED_PROXIES`, `DDAG_RATE_LIMIT_FAIL_MODE`, `DDAG_INTERNAL_AUTH_SECRET`, `DDAG_CONNECTOR_*_URL` |
+| Gateway | `DDAG_POLICY_MODE`, `DDAG_CACHE_MODE`, `DDAG_ROUTE_REFRESH`, `DDAG_DEFAULT_LIMIT`, `DDAG_MAX_LIMIT`, `DDAG_TRUSTED_PROXIES`, `DDAG_RATE_LIMIT_FAIL_MODE`, `DDAG_INTERNAL_AUTH_SECRET`, `DDAG_BACKPRESSURE_QUEUE_SIZE`, `DDAG_BACKPRESSURE_TIMEOUT`, `DDAG_CONNECTOR_*_URL` |
 | Circuit breaker | `DDAG_CB_MAX_REQUESTS`, `DDAG_CB_INTERVAL`, `DDAG_CB_TIMEOUT`, `DDAG_CB_FAILURE_THRESHOLD`, `DDAG_CB_FAILURE_RATIO` |
 | Per-service | `DDAG_HTTP_ADDR` (defaults to each service's conventional port) |
 
@@ -51,6 +51,9 @@ Re-running any seed is idempotent.
   `make run-worker`, `make run-connector-postgres`, etc.
 - **Docker:** `docker compose up -d --build`, then
   `docker compose run --rm migrate --demo`.
+- **VPS / bare metal:** use [docs/DEPLOY_VPS.md](DEPLOY_VPS.md) for the
+  systemd + Caddy runbook. The recommended layout uses separate public hostnames
+  for the dashboard/control plane and gateway/data plane.
 - **Kubernetes:** `kubectl apply -k deploy/k8s` (edit `secret.yaml` and
   `configmap.yaml` first), or use the Helm chart:
   `helm upgrade --install ddag deploy/helm/ddag -n ddag --create-namespace`.
@@ -76,7 +79,7 @@ Every service exposes:
 - `GET /readyz` — readiness (checks DB/Redis dependencies)
 - `GET /metrics` — Prometheus metrics (`ddag_*`)
 
-v2.0 metrics added for high-concurrency operations:
+High-concurrency metrics:
 
 | Metric | Meaning |
 |---|---|
@@ -86,6 +89,12 @@ v2.0 metrics added for high-concurrency operations:
 | `ddag_circuit_state` | Circuit state by connection (`0=closed`, `1=half-open`, `2=open`) |
 | `ddag_circuit_open_total` | Circuit open transitions |
 | `ddag_circuit_half_open_total` | Circuit half-open transitions |
+| `ddag_connector_requests_total` | Connector requests by connection and DB type |
+| `ddag_db_pool_active` / `ddag_db_pool_idle` | Runtime source DB pool usage |
+| `ddag_db_pool_wait_count` / `ddag_db_pool_wait_duration_ms` | Pool wait pressure |
+| `ddag_queue_depth` | Gateway backpressure queue depth |
+| `ddag_queued_requests_total` | Requests admitted to the queue |
+| `ddag_queue_timeout_total` / `ddag_rejected_requests_total` | Backpressure timeouts and rejects |
 
 Prometheus scrape config: [deploy/prometheus/prometheus.yml](../deploy/prometheus/prometheus.yml).
 Grafana datasource + dashboard auto-provision from
@@ -103,6 +112,10 @@ security events, connector errors).
   Query** → Save Draft → **Publish**. Publishing runs the safety validator; list
   calls are paginated at SQL level with connector-specific `LIMIT/OFFSET` or
   `OFFSET/FETCH` syntax.
+- **Build a safe query:** API Management can store `response_mapping.query_builder`
+  metadata for whitelisted filters, sort columns, inner/left joins, and
+  aggregation. Use SQL Preview before Publish; Explain is available for
+  PostgreSQL/MySQL connectors.
 - **Grant a client:** Dashboard → Clients → New (secret shown once) → assign
   scopes + APIs + rate limit + IP whitelist.
 - **Rotate a client secret:** Clients → Rotate (new secret shown once; the
@@ -113,6 +126,8 @@ security events, connector errors).
 - **Inspect circuit breakers:** Dashboard → Monitoring shows each connection's
   circuit state. The backend endpoint is `GET /api/circuit-breakers` and
   requires `view_circuit_state`.
+- **Inspect pool usage:** Dashboard → Connections/Monitoring show active, idle,
+  max, wait, and timeout counters via `GET /api/pool-stats`.
 
 ## Backup & DR
 
@@ -130,9 +145,12 @@ security events, connector errors).
 | `401` from gateway | Missing/expired/invalid token; check `auth-service` and JWKS reachability |
 | `403 FORBIDDEN` | Token lacks the API's scope, client not granted the API, or IP not whitelisted |
 | `404 API_NOT_FOUND` | API not published, or route table not yet refreshed (`DDAG_ROUTE_REFRESH`) |
-| `408 QUERY_TIMEOUT` | Source query exceeded the connection's query timeout |
+| `408 DB_QUERY_TIMEOUT` | Source query exceeded the connection's query timeout |
 | `429 RATE_LIMITED` | Client/API/IP rate limit hit (see `ddag_rate_limited_total`) |
-| `502 CONNECTOR_ERROR` / `503` | Source DB unreachable, circuit breaker open, or connector unavailable; check connector logs + pool gauges |
+| `502 CONNECTOR_UNAVAILABLE` | Connector service is down, not configured, or returned invalid data |
+| `503 DB_POOL_EXHAUSTED` | Source DB pool is full; lower burst traffic or tune pool/backpressure |
+| `503 BACKPRESSURE_LIMIT` | Gateway queue timed out or is saturated |
+| `503 CIRCUIT_BREAKER_OPEN` | Source connection is temporarily disabled by circuit breaker |
 | `503` when Redis is down | `DDAG_RATE_LIMIT_FAIL_MODE=closed`; use `open` for availability-priority fail-open behavior |
 | Dashboard can't log in | Check `DDAG_DASHBOARD_ORIGINS` (CORS) and that `admin-backend` migrated/seeded |
 | `too many failed attempts acquiring connection` | A source connection's pool can't connect — verify host/credentials via Test Connection |
@@ -152,6 +170,43 @@ secrets.
 
 Logs are structured JSON with a propagated `request_id`; grep by it to trace a
 request across services.
+
+## v3 query builder
+
+Optional builder metadata is stored in `api_definitions.response_mapping`:
+
+```json
+{
+  "query_builder": {
+    "base_table": "karyawan",
+    "select": ["karyawan.id", "karyawan.nama", "COUNT(t.id) AS total_transaksi"],
+    "joins": [
+      {
+        "type": "left",
+        "table": "transaksi",
+        "alias": "t",
+        "on": { "left": "karyawan.id", "operator": "=", "right": "t.karyawan_id" }
+      }
+    ],
+    "filters": [
+      { "name": "status", "column": "karyawan.status", "operators": ["eq", "in"] },
+      { "name": "nama", "column": "karyawan.nama", "operators": ["like", "eq"] }
+    ],
+    "sortable_columns": [
+      { "name": "created_at", "column": "karyawan.created_at" }
+    ],
+    "group_by": ["karyawan.id", "karyawan.nama"]
+  }
+}
+```
+
+Values from request query params are always converted into named bind
+parameters before reaching a connector.
+
+## v3 load tests
+
+See [docs/TESTING_V3.md](TESTING_V3.md) for token generation, endpoint export,
+Python no-dependency load tests, k6 runs, and markdown report generation.
 
 ## CI / release checks
 

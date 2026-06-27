@@ -77,6 +77,8 @@ func (s *service) routes() http.Handler {
 		pr.Method("GET", "/api/apis", perm(rbac.ViewDashboard, s.listAPIs))
 		pr.Method("POST", "/api/apis", perm(rbac.CreateAPI, s.createAPI))
 		pr.Method("POST", "/api/apis/test", perm(rbac.EditAPI, s.testQuery))
+		pr.Method("POST", "/api/apis/preview", perm(rbac.EditAPI, s.previewQuery))
+		pr.Method("POST", "/api/apis/explain", perm(rbac.EditAPI, s.explainQuery))
 		pr.Method("GET", "/api/apis/{id}", perm(rbac.ViewDashboard, s.getAPI))
 		pr.Method("PUT", "/api/apis/{id}", perm(rbac.EditAPI, s.updateAPI))
 		pr.Method("DELETE", "/api/apis/{id}", perm(rbac.DisableAPI, s.deleteAPI))
@@ -105,6 +107,7 @@ func (s *service) routes() http.Handler {
 
 		// Logs & audit.
 		pr.Method("GET", "/api/circuit-breakers", perm(rbac.ViewCircuitState, s.listCircuitBreakers))
+		pr.Method("GET", "/api/pool-stats", perm(rbac.ViewMonitoring, s.listPoolStats))
 		pr.Method("GET", "/api/request-logs", perm(rbac.ViewMonitoring, s.listRequestLogs))
 		pr.Method("GET", "/api/audit-logs", perm(rbac.ViewAudit, s.listAuditLogs))
 

@@ -62,10 +62,10 @@ func NewConnectorClient(urls map[string]string, internalAuth ...string) *Connect
 func (c *ConnectorClient) Query(ctx context.Context, dbType string, req ConnectorRequest) (*ConnectorResponse, *httpx.APIError) {
 	base, ok := c.urls[dbType]
 	if !ok {
-		return nil, httpx.NewError(httpx.CodeConnectorError, "no connector configured for "+dbType)
+		return nil, httpx.NewError(httpx.CodeConnectorUnavailable, "no connector configured for "+dbType)
 	}
 	if c.circuits.IsOpen(req.ConnectionID) {
-		return nil, httpx.NewError(httpx.CodeSourceDBUnavailable, "Database connection temporarily unavailable (circuit open)")
+		return nil, httpx.NewError(httpx.CodeCircuitBreakerOpen, "Database connection temporarily unavailable (circuit open)")
 	}
 	body, _ := json.Marshal(req)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/query", bytes.NewReader(body))
@@ -80,17 +80,17 @@ func (c *ConnectorClient) Query(ctx context.Context, dbType string, req Connecto
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, httpx.NewError(httpx.CodeSourceDBUnavailable, "connector unavailable")
+		return nil, httpx.NewError(httpx.CodeConnectorUnavailable, "connector unavailable")
 	}
 	defer resp.Body.Close()
 
 	var cr ConnectorResponse
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
-		return nil, httpx.NewError(httpx.CodeConnectorError, "invalid connector response")
+		return nil, httpx.NewError(httpx.CodeConnectorUnavailable, "invalid connector response")
 	}
 	c.circuits.Set(req.ConnectionID, cr.CircuitState)
 	if resp.StatusCode == http.StatusRequestTimeout {
-		return nil, httpx.NewError(httpx.CodeQueryTimeout, "query timed out")
+		return nil, httpx.NewError(httpx.CodeDBQueryTimeout, "query timed out")
 	}
 	if resp.StatusCode >= 400 || !cr.Success {
 		code := httpx.CodeConnectorError

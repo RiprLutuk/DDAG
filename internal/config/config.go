@@ -112,17 +112,19 @@ type SessionConfig struct {
 
 // GatewayConfig configures the dynamic API gateway data plane.
 type GatewayConfig struct {
-	PolicyMode         string            // inprocess | remote
-	CacheMode          string            // inprocess | remote
-	PolicyURL          string            // when PolicyMode=remote
-	CacheURL           string            // when CacheMode=remote
-	ConnectorURLs      map[string]string // db_type -> connector base URL
-	RouteRefresh       time.Duration     // how often the gateway reloads API definitions
-	DefaultLimit       int               // default row limit for list/search
-	MaxLimit           int               // hard cap on row limit
-	TrustedProxies     []string          // CIDR/single-IP ranges allowed to set X-Forwarded-For
-	RateLimitFailMode  string            // open | closed
-	InternalAuthSecret string            // HMAC secret for gateway->connector requests
+	PolicyMode          string            // inprocess | remote
+	CacheMode           string            // inprocess | remote
+	PolicyURL           string            // when PolicyMode=remote
+	CacheURL            string            // when CacheMode=remote
+	ConnectorURLs       map[string]string // db_type -> connector base URL
+	RouteRefresh        time.Duration     // how often the gateway reloads API definitions
+	DefaultLimit        int               // default row limit for list/search
+	MaxLimit            int               // hard cap on row limit
+	TrustedProxies      []string          // CIDR/single-IP ranges allowed to set X-Forwarded-For
+	RateLimitFailMode   string            // open | closed
+	InternalAuthSecret  string            // HMAC secret for gateway->connector requests
+	BackpressureSize    int               // per API/connector queue capacity
+	BackpressureTimeout time.Duration     // max wait before BACKPRESSURE_LIMIT
 }
 
 // CircuitConfig configures connector-side circuit breakers.
@@ -197,12 +199,14 @@ func Load(service string) Config {
 				"oracle":    getEnv("DDAG_CONNECTOR_ORACLE_URL", "http://localhost:8092"),
 				"sqlserver": getEnv("DDAG_CONNECTOR_SQLSERVER_URL", "http://localhost:8093"),
 			},
-			RouteRefresh:       getEnvDuration("DDAG_ROUTE_REFRESH", 15*time.Second),
-			DefaultLimit:       getEnvInt("DDAG_DEFAULT_LIMIT", 100),
-			MaxLimit:           getEnvInt("DDAG_MAX_LIMIT", 1000),
-			TrustedProxies:     splitCSV(getEnv("DDAG_TRUSTED_PROXIES", "")),
-			RateLimitFailMode:  strings.ToLower(getEnv("DDAG_RATE_LIMIT_FAIL_MODE", "open")),
-			InternalAuthSecret: getEnv("DDAG_INTERNAL_AUTH_SECRET", ""),
+			RouteRefresh:        getEnvDuration("DDAG_ROUTE_REFRESH", 15*time.Second),
+			DefaultLimit:        getEnvInt("DDAG_DEFAULT_LIMIT", 100),
+			MaxLimit:            getEnvInt("DDAG_MAX_LIMIT", 1000),
+			TrustedProxies:      splitCSV(getEnv("DDAG_TRUSTED_PROXIES", "")),
+			RateLimitFailMode:   strings.ToLower(getEnv("DDAG_RATE_LIMIT_FAIL_MODE", "open")),
+			InternalAuthSecret:  getEnv("DDAG_INTERNAL_AUTH_SECRET", ""),
+			BackpressureSize:    getEnvInt("DDAG_BACKPRESSURE_QUEUE_SIZE", 32),
+			BackpressureTimeout: getEnvDuration("DDAG_BACKPRESSURE_TIMEOUT", 500*time.Millisecond),
 		},
 		Circuit: CircuitConfig{
 			MaxRequests:      getEnvInt("DDAG_CB_MAX_REQUESTS", 1),

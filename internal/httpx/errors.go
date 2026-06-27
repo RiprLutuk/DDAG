@@ -16,6 +16,15 @@ const (
 	CodeConnectorError      = "CONNECTOR_ERROR"
 	CodeSourceDBUnavailable = "SOURCE_DB_UNAVAILABLE"
 	CodeValidation          = "VALIDATION_ERROR"
+
+	CodeConnectorUnavailable  = "CONNECTOR_UNAVAILABLE"
+	CodeDBPoolExhausted       = "DB_POOL_EXHAUSTED"
+	CodeDBConnectTimeout      = "DB_CONNECT_TIMEOUT"
+	CodeDBQueryTimeout        = "DB_QUERY_TIMEOUT"
+	CodeCircuitBreakerOpen    = "CIRCUIT_BREAKER_OPEN"
+	CodeBackpressureLimit     = "BACKPRESSURE_LIMIT"
+	CodeQueryValidationFailed = "QUERY_VALIDATION_FAILED"
+	CodeScopeForbidden        = "SCOPE_FORBIDDEN"
 )
 
 // statusByCode maps an error code to its HTTP status (PRD §18).
@@ -31,6 +40,15 @@ var statusByCode = map[string]int{
 	CodeInternal:            http.StatusInternalServerError,
 	CodeConnectorError:      http.StatusBadGateway,
 	CodeSourceDBUnavailable: http.StatusServiceUnavailable,
+
+	CodeConnectorUnavailable:  http.StatusBadGateway,
+	CodeDBPoolExhausted:       http.StatusServiceUnavailable,
+	CodeDBConnectTimeout:      http.StatusGatewayTimeout,
+	CodeDBQueryTimeout:        http.StatusRequestTimeout,
+	CodeCircuitBreakerOpen:    http.StatusServiceUnavailable,
+	CodeBackpressureLimit:     http.StatusServiceUnavailable,
+	CodeQueryValidationFailed: http.StatusBadRequest,
+	CodeScopeForbidden:        http.StatusForbidden,
 }
 
 // APIError is an error carrying a stable DDAG error code and a client-safe
@@ -38,6 +56,7 @@ var statusByCode = map[string]int{
 type APIError struct {
 	Code    string
 	Message string
+	Details map[string]any
 }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
@@ -45,6 +64,12 @@ func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 // NewError builds an APIError.
 func NewError(code, message string) *APIError {
 	return &APIError{Code: code, Message: message}
+}
+
+// NewErrorWithDetails builds an APIError with safe, structured diagnostic
+// details. Callers must not include credentials or raw SQL here.
+func NewErrorWithDetails(code, message string, details map[string]any) *APIError {
+	return &APIError{Code: code, Message: message, Details: details}
 }
 
 // HTTPStatus returns the HTTP status for the error's code.
@@ -66,7 +91,7 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 	WriteJSON(w, apiErr.HTTPStatus(), ErrorEnvelope{
 		Success:   false,
 		RequestID: RequestID(r.Context()),
-		Error:     ErrorBody{Code: apiErr.Code, Message: apiErr.Message},
+		Error:     ErrorBody{Code: apiErr.Code, Message: apiErr.Message, Details: apiErr.Details},
 	})
 }
 

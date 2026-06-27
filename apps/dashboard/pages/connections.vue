@@ -4,12 +4,14 @@ const api = useApi()
 const toast = useToast()
 
 const rows = ref<any[]>([])
+const poolStats = ref<any[]>([])
 const loading = ref(true)
 const columns = [
   { key: 'name', label: 'Name' },
   { key: 'database_type', label: 'Type' },
   { key: 'host', label: 'Host' },
   { key: 'pool', label: 'Pool' },
+  { key: 'pool_usage', label: 'Usage' },
   { key: 'status', label: 'Status' },
   { key: 'last_health_status', label: 'Health' },
 ]
@@ -30,9 +32,27 @@ const form = reactive<any>(blank())
 
 async function load() {
   loading.value = true
-  try { rows.value = (await api.list('/api/connections')).items } finally { loading.value = false }
+  try {
+    const [connRows, pools] = await Promise.all([
+      api.list('/api/connections'),
+      api.get('/api/pool-stats').catch(() => []),
+    ])
+    rows.value = connRows.items
+    poolStats.value = pools || []
+  } finally { loading.value = false }
 }
 onMounted(load)
+
+function poolFor(id: string) { return poolStats.value.find((p) => p.connection_id === id) || null }
+function applyPreset(kind: string) {
+  const presets: Record<string, any> = {
+    vps: { min_pool_size: 0, max_pool_size: 3, connection_timeout_ms: 3000, query_timeout_ms: 12000, max_conn_lifetime_ms: 1800000, max_conn_idle_ms: 300000 },
+    normal: { min_pool_size: 2, max_pool_size: 10, connection_timeout_ms: 5000, query_timeout_ms: 30000, max_conn_lifetime_ms: 3600000, max_conn_idle_ms: 1800000 },
+    staging: { min_pool_size: 2, max_pool_size: 15, connection_timeout_ms: 5000, query_timeout_ms: 30000, max_conn_lifetime_ms: 3600000, max_conn_idle_ms: 1800000 },
+    prod: { min_pool_size: 4, max_pool_size: 25, connection_timeout_ms: 5000, query_timeout_ms: 45000, max_conn_lifetime_ms: 3600000, max_conn_idle_ms: 1800000 },
+  }
+  Object.assign(form, presets[kind])
+}
 
 function openCreate() {
   Object.assign(form, blank()); editing.value = null; testResult.value = null; modalOpen.value = true
@@ -87,6 +107,10 @@ async function remove(row: any) {
     <template #col-database_type="{ value }"><span class="badge blue">{{ value }}</span></template>
     <template #col-host="{ row }"><span class="mono">{{ row.host }}:{{ row.port }}/{{ row.database_name || row.service_name }}</span></template>
     <template #col-pool="{ row }"><span class="mono">{{ row.min_pool_size }}–{{ row.max_pool_size }}</span></template>
+    <template #col-pool_usage="{ row }">
+      <span v-if="poolFor(row.id)" class="mono">{{ poolFor(row.id).in_use }}/{{ poolFor(row.id).idle }}/{{ poolFor(row.id).max }}</span>
+      <span v-else class="faint">—</span>
+    </template>
     <template #col-status="{ value }"><StatusBadge :status="value" /></template>
     <template #col-last_health_status="{ value }"><StatusBadge :status="value" /></template>
     <template #actions="{ row }">
@@ -130,6 +154,13 @@ async function remove(row: any) {
       </div>
     </div>
     <h4 style="margin:8px 0 10px;color:var(--text-dim)">Connection Pool</h4>
+    <div class="toolbar" style="padding:0;margin-bottom:10px">
+      <button class="btn sm ghost" type="button" @click="applyPreset('vps')">Low VPS</button>
+      <button class="btn sm ghost" type="button" @click="applyPreset('normal')">Normal</button>
+      <button class="btn sm ghost" type="button" @click="applyPreset('staging')">Staging</button>
+      <button class="btn sm ghost" type="button" @click="applyPreset('prod')">Production</button>
+      <div class="spacer" />
+    </div>
     <div class="row">
       <div class="field"><label>Min Pool</label><input v-model.number="form.min_pool_size" type="number" /></div>
       <div class="field"><label>Max Pool</label><input v-model.number="form.max_pool_size" type="number" /></div>
