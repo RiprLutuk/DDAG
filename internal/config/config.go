@@ -30,6 +30,12 @@ type Config struct {
 	Gateway  GatewayConfig
 	Circuit  CircuitConfig
 
+	// ConnCacheTTL bounds how long a connector caches a resolved connection
+	// (metadata row + decrypted secret) before reloading. Keeps the metadata DB
+	// and secret decryption off the data-plane hot path; also the staleness
+	// window for picking up connection config changes.
+	ConnCacheTTL time.Duration
+
 	DashboardOrigins []string
 }
 
@@ -125,6 +131,9 @@ type GatewayConfig struct {
 	InternalAuthSecret  string            // HMAC secret for gateway->connector requests
 	BackpressureSize    int               // per API/connector queue capacity
 	BackpressureTimeout time.Duration     // max wait before BACKPRESSURE_LIMIT
+	RequestLogBuffer    int               // async access-log channel capacity (overflow is dropped + counted)
+	RequestLogBatch     int               // max records per batched INSERT
+	RequestLogFlush     time.Duration     // max time a record waits before flush
 }
 
 // CircuitConfig configures connector-side circuit breakers.
@@ -207,6 +216,9 @@ func Load(service string) Config {
 			InternalAuthSecret:  getEnv("DDAG_INTERNAL_AUTH_SECRET", ""),
 			BackpressureSize:    getEnvInt("DDAG_BACKPRESSURE_QUEUE_SIZE", 32),
 			BackpressureTimeout: getEnvDuration("DDAG_BACKPRESSURE_TIMEOUT", 500*time.Millisecond),
+			RequestLogBuffer:    getEnvInt("DDAG_REQUEST_LOG_BUFFER", 4096),
+			RequestLogBatch:     getEnvInt("DDAG_REQUEST_LOG_BATCH", 200),
+			RequestLogFlush:     getEnvDuration("DDAG_REQUEST_LOG_FLUSH", time.Second),
 		},
 		Circuit: CircuitConfig{
 			MaxRequests:      getEnvInt("DDAG_CB_MAX_REQUESTS", 1),
@@ -215,6 +227,7 @@ func Load(service string) Config {
 			FailureThreshold: getEnvInt("DDAG_CB_FAILURE_THRESHOLD", 5),
 			FailureRatio:     getEnvFloat("DDAG_CB_FAILURE_RATIO", 0.6),
 		},
+		ConnCacheTTL: getEnvDuration("DDAG_CONN_CACHE_TTL", 15*time.Second),
 	}
 	return c
 }

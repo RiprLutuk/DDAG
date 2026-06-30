@@ -86,6 +86,39 @@ func (s *Store) InsertRequestLog(ctx context.Context, r *models.APIRequestLog) e
 	return err
 }
 
+// InsertRequestLogBatch inserts many request logs in a single multi-row INSERT,
+// so the async logger amortizes one round-trip + one statement across a whole
+// batch instead of one INSERT (and one pooled connection) per request.
+func (s *Store) InsertRequestLogBatch(ctx context.Context, rs []*models.APIRequestLog) error {
+	if len(rs) == 0 {
+		return nil
+	}
+	const cols = 13
+	var b strings.Builder
+	b.WriteString(`INSERT INTO api_request_logs (request_id, client_id, api_definition_id, client_label,
+		api_label, method, path, status_code, error_code, latency_ms, cached, source_db_duration_ms,
+		ip_address) VALUES `)
+	args := make([]any, 0, len(rs)*cols)
+	for i, r := range rs {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('(')
+		for j := 0; j < cols; j++ {
+			if j > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteByte('$')
+			b.WriteString(itoa(i*cols + j + 1))
+		}
+		b.WriteByte(')')
+		args = append(args, r.RequestID, r.ClientID, r.APIDefinitionID, r.ClientLabel, r.APILabel,
+			r.Method, r.Path, r.StatusCode, r.ErrorCode, r.LatencyMS, r.Cached, r.SourceDBDurationMS, r.IPAddress)
+	}
+	_, err := s.pool.Exec(ctx, b.String(), args...)
+	return err
+}
+
 func (s *Store) ListRequestLogs(ctx context.Context, p ListParams, clientID *uuid.UUID) ([]models.APIRequestLog, int64, error) {
 	p.Normalize()
 	var total int64

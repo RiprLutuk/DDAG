@@ -42,6 +42,8 @@ type Metrics struct {
 	QueryDuration     *prometheus.HistogramVec // by connection, db_type
 	ConnectorRequests *prometheus.CounterVec   // by connection, db_type
 	ConnectorErr      *prometheus.CounterVec   // by connection, db_type
+	ConnCacheHits     *prometheus.CounterVec   // by db_type — resolved-connection cache hits
+	ConnCacheMisses   *prometheus.CounterVec   // by db_type — resolved-connection cache misses (metadata round-trip)
 	CircuitState      *prometheus.GaugeVec     // by connection, db_type
 	CircuitOpen       *prometheus.CounterVec   // by connection, db_type
 	CircuitHalfOpen   *prometheus.CounterVec   // by connection, db_type
@@ -58,6 +60,8 @@ type Metrics struct {
 	QueueDepth       *prometheus.GaugeVec   // by route/api
 	QueueTimeout     *prometheus.CounterVec // by route/api
 	RejectedRequests *prometheus.CounterVec // by route/api
+
+	RequestLogsDropped prometheus.Counter // access-log records dropped when the async buffer is full
 }
 
 // New creates and registers the DDAG metric set for the given service.
@@ -130,6 +134,12 @@ func New(service string) *Metrics {
 		ConnectorErr: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "ddag_connector_errors_total", Help: "Connector errors.", ConstLabels: labels,
 		}, []string{"connection", "db_type"}),
+		ConnCacheHits: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_conn_cache_hits_total", Help: "Resolved-connection cache hits (no metadata round-trip).", ConstLabels: labels,
+		}, []string{"db_type"}),
+		ConnCacheMisses: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "ddag_conn_cache_misses_total", Help: "Resolved-connection cache misses (metadata round-trip + secret decrypt).", ConstLabels: labels,
+		}, []string{"db_type"}),
 		CircuitState: f.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "ddag_circuit_state", Help: "Circuit breaker state: 0=closed, 1=half-open, 2=open.", ConstLabels: labels,
 		}, []string{"connection", "db_type"}),
@@ -175,6 +185,9 @@ func New(service string) *Metrics {
 		RejectedRequests: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "ddag_rejected_requests_total", Help: "Requests rejected by gateway backpressure.", ConstLabels: labels,
 		}, []string{"route"}),
+		RequestLogsDropped: f.NewCounter(prometheus.CounterOpts{
+			Name: "ddag_request_logs_dropped_total", Help: "Access-log records dropped because the async buffer was full.", ConstLabels: labels,
+		}),
 	}
 	m.registerDefaultSeries(service)
 	return m
@@ -212,6 +225,7 @@ func (m *Metrics) registerDefaultSeries(service string) {
 		m.QueueDepth.WithLabelValues(unknown).Set(0)
 		m.QueueTimeout.WithLabelValues(unknown).Add(0)
 		m.RejectedRequests.WithLabelValues(unknown).Add(0)
+		m.RequestLogsDropped.Add(0)
 		return
 	}
 	if !strings.HasPrefix(service, "connector-") {
@@ -223,6 +237,8 @@ func (m *Metrics) registerDefaultSeries(service string) {
 	}
 	m.ConnectorRequests.WithLabelValues(unknown, dbType).Add(0)
 	m.ConnectorErr.WithLabelValues(unknown, dbType).Add(0)
+	m.ConnCacheHits.WithLabelValues(dbType).Add(0)
+	m.ConnCacheMisses.WithLabelValues(dbType).Add(0)
 	m.CircuitState.WithLabelValues(unknown, dbType).Set(0)
 	m.CircuitOpen.WithLabelValues(unknown, dbType).Add(0)
 	m.CircuitHalfOpen.WithLabelValues(unknown, dbType).Add(0)

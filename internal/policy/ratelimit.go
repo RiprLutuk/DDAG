@@ -12,17 +12,32 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// fixedWindowScript atomically increments a counter and sets its expiry on first
-// use, returning the new count. Fixed-window counters across multiple windows
-// (second/minute/hour/day) approximate a multi-rate limiter and stay consistent
-// across gateway pods because the state lives in shared Redis (PRD §14.3).
-var fixedWindowScript = redis.NewScript(`
-local current = redis.call('INCR', KEYS[1])
-if current == 1 then
-  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+// multiWindowScript evaluates every rate-limit window for a key in a single
+// atomic round-trip. For each window i it INCRs KEYS[i], sets the expiry on
+// first use (ARGV pairs are [limit, duration_ms] per window), and appends
+// {current, ttl} to the result. It stops at the first window whose count
+// exceeds its limit — matching the ordered short-circuit of the caller so a
+// rejected request never consumes the larger windows' quota. Running all
+// windows in one script (instead of one round-trip each) cuts Redis latency on
+// the hot path and makes the windows mutually consistent under concurrency.
+// State lives in shared Redis so limits hold across gateway pods (PRD §14.3).
+var multiWindowScript = redis.NewScript(`
+local out = {}
+for i = 1, #KEYS do
+  local limit = tonumber(ARGV[(i-1)*2 + 1])
+  local dur   = tonumber(ARGV[(i-1)*2 + 2])
+  local current = redis.call('INCR', KEYS[i])
+  if current == 1 then
+    redis.call('PEXPIRE', KEYS[i], dur)
+  end
+  local ttl = redis.call('PTTL', KEYS[i])
+  out[#out+1] = current
+  out[#out+1] = ttl
+  if current > limit then
+    return out
+  end
 end
-local ttl = redis.call('PTTL', KEYS[1])
-return {current, ttl}
+return out
 `)
 
 // Window is a single rate-limit window definition.
@@ -62,17 +77,36 @@ type Decision struct {
 // denies the request. Remaining/reset reflect the most constraining window.
 func (rl *RateLimiter) Allow(ctx context.Context, base string, windows []Window) (Decision, error) {
 	d := Decision{Allowed: true, Remaining: -1}
+
+	keys := make([]string, 0, len(windows))
+	argv := make([]any, 0, len(windows)*2)
+	active := make([]Window, 0, len(windows))
 	for _, w := range windows {
 		if w.Limit <= 0 {
 			continue
 		}
-		key := "ddag:rl:" + base + ":" + w.Suffix
-		res, err := fixedWindowScript.Run(ctx, rl.rdb, []string{key}, w.Duration.Milliseconds()).Slice()
-		if err != nil {
-			return d, err
+		keys = append(keys, "ddag:rl:"+base+":"+w.Suffix)
+		argv = append(argv, w.Limit, w.Duration.Milliseconds())
+		active = append(active, w)
+	}
+	if len(keys) == 0 {
+		d.Remaining = 0
+		return d, nil
+	}
+
+	res, err := multiWindowScript.Run(ctx, rl.rdb, keys, argv...).Slice()
+	if err != nil {
+		return d, err
+	}
+
+	// res holds {current, ttl} per window the script evaluated, in order; it
+	// stops after the first exceeded window, so len(res)/2 may be < len(active).
+	for i, w := range active {
+		if i*2+1 >= len(res) {
+			break
 		}
-		current := toInt(res[0])
-		ttlMS := toInt(res[1])
+		current := toInt(res[i*2])
+		ttlMS := toInt(res[i*2+1])
 		remaining := w.Limit - current
 		if remaining < 0 {
 			remaining = 0

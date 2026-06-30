@@ -45,11 +45,22 @@ func (c *sqlConnector) Query(ctx context.Context, req QueryRequest) (*QueryResul
 		return nil, err
 	}
 	query, args = ApplyPagination(query, args, c.cfg.DatabaseType, req.Limit, req.Offset)
+
+	// Bound connection acquisition separately from the query so an exhausted pool
+	// fails fast (pool-exhausted) instead of burning the full query timeout.
+	acqCtx, cancelAcq := context.WithTimeout(ctx, connectTO(c.cfg))
+	conn, err := c.db.Conn(acqCtx)
+	cancelAcq()
+	if err != nil {
+		return nil, fmt.Errorf("pool acquire: %w", err)
+	}
+	defer conn.Close()
+
 	qctx, cancel := context.WithTimeout(ctx, queryTO(c.cfg, req.TimeoutMS))
 	defer cancel()
 
 	start := time.Now()
-	rows, err := c.db.QueryContext(qctx, query, args...)
+	rows, err := conn.QueryContext(qctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

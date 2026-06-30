@@ -1,7 +1,6 @@
 package gatewaysvc
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -21,25 +20,40 @@ type payload struct {
 }
 
 // buildPayload shapes the connector rows into a single object (for single-row
-// endpoints) or a list with pagination.
+// endpoints) or a list with pagination. The connector's rows array is passed
+// through as raw JSON — no per-row unmarshal/remarshal — and counts come from
+// RowCount.
 func buildPayload(resp *gateway.ConnectorResponse, isList bool, page, effLimit, offset int) payload {
 	if !isList {
-		if len(resp.Rows) == 0 {
+		first, ok := firstRow(resp.Rows)
+		if !ok {
 			return payload{Data: json.RawMessage("null"), CircuitState: resp.CircuitState}
 		}
-		b, _ := json.Marshal(resp.Rows[0])
-		return payload{Data: b, CircuitState: resp.CircuitState}
+		return payload{Data: first, CircuitState: resp.CircuitState}
 	}
-	rows := resp.Rows
-	if rows == nil {
-		rows = []map[string]any{}
+	data := resp.Rows
+	if len(data) == 0 || string(data) == "null" {
+		data = json.RawMessage("[]")
 	}
-	b, _ := json.Marshal(rows)
 	return payload{
-		Data:         b,
+		Data:         data,
 		CircuitState: resp.CircuitState,
-		Pagination:   &httpx.Pagination{Page: page, Limit: effLimit, Offset: offset, Total: int64(len(rows)), HasNext: len(rows) == effLimit},
+		Pagination:   &httpx.Pagination{Page: page, Limit: effLimit, Offset: offset, Total: int64(resp.RowCount), HasNext: resp.RowCount == effLimit},
 	}
+}
+
+// firstRow returns the first element of a JSON rows array without unmarshaling
+// each row's fields. Single-row endpoints carry at most one row, so this stays
+// cheap.
+func firstRow(rows json.RawMessage) (json.RawMessage, bool) {
+	if len(rows) == 0 {
+		return nil, false
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(rows, &arr); err != nil || len(arr) == 0 {
+		return nil, false
+	}
+	return arr[0], true
 }
 
 type connectorPayload struct {
@@ -102,13 +116,14 @@ type reqLog struct {
 	sourceMS    int
 }
 
-// writeRequestLog persists the data-plane request record asynchronously so it
-// never adds latency to the response path.
+// writeRequestLog hands the data-plane request record to the async batched
+// logger so it never adds latency to the response path and never spawns a
+// goroutine + INSERT per request.
 func (s *service) writeRequestLog(rl *reqLog) {
 	if rl.status == 0 {
 		rl.status = http.StatusOK
 	}
-	rec := &models.APIRequestLog{
+	s.reqLogger.enqueue(&models.APIRequestLog{
 		RequestID:          rl.requestID,
 		ClientID:           rl.clientID,
 		APIDefinitionID:    &rl.apiID,
@@ -122,12 +137,5 @@ func (s *service) writeRequestLog(rl *reqLog) {
 		Cached:             rl.cached,
 		SourceDBDurationMS: rl.sourceMS,
 		IPAddress:          rl.ip,
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := s.store.InsertRequestLog(ctx, rec); err != nil {
-			s.log.Warn("request_log_failed", "error", err.Error())
-		}
-	}()
+	})
 }

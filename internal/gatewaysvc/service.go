@@ -40,6 +40,7 @@ type service struct {
 	log          *logging.Logger
 	flights      *flightGroup
 	backpressure *backpressureManager
+	reqLogger    *requestLogger
 
 	trustedProxies []netip.Prefix
 
@@ -83,6 +84,8 @@ func Run() error {
 		backpressure:   newBackpressureManager(cfg.Gateway.BackpressureSize, cfg.Gateway.BackpressureTimeout),
 		trustedProxies: trustedProxies,
 	}
+	svc.reqLogger = newRequestLogger(store.New(pool), log, m,
+		cfg.Gateway.RequestLogBuffer, cfg.Gateway.RequestLogBatch, cfg.Gateway.RequestLogFlush)
 
 	// Initial JWKS load with a short retry (auth-service may start concurrently).
 	for i := 0; i < 5; i++ {
@@ -96,16 +99,21 @@ func Run() error {
 	}
 	log.Info("routes_loaded", "count", svc.router.Count())
 
+	// Idle-safe zero-series for Grafana aggregate panels are registered centrally
+	// by metrics.New -> registerDefaultSeries (label "unknown"), PRD v3 §8, §16.4.
+
 	refreshCtx, cancelRefresh := context.WithCancel(ctx)
 	go svc.jwks.startRefresh(refreshCtx, cfg.Auth.JWKSRefreshInterval)
 	go svc.routeRefreshLoop(refreshCtx, cfg.Gateway.RouteRefresh)
 	go svc.metadataSyncLoop(refreshCtx, rdb)
+	svc.reqLogger.start(refreshCtx)
 
 	return server.Service{
 		Name: "api-gateway", Addr: cfg.HTTPAddr, Handler: http.HandlerFunc(svc.serve), Logger: log, Metrics: m,
 		Ready: func() bool { return pool.Ping(ctx) == nil && svc.jwks.hasKeys() },
 		OnShutdown: func(context.Context) {
 			cancelRefresh()
+			svc.reqLogger.stop() // drain + final flush while the pool is still open
 			_ = rdb.Close()
 			pool.Close()
 		},

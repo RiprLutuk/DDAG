@@ -81,11 +81,22 @@ func (c *pgConnector) Query(ctx context.Context, req QueryRequest) (*QueryResult
 		return nil, err
 	}
 	sql, args = ApplyPagination(sql, args, c.cfg.DatabaseType, req.Limit, req.Offset)
+
+	// Bound connection acquisition separately from the query so an exhausted pool
+	// fails fast (pool-exhausted) instead of burning the full query timeout.
+	acqCtx, cancelAcq := context.WithTimeout(ctx, connectTO(c.cfg))
+	conn, err := c.pool.Acquire(acqCtx)
+	cancelAcq()
+	if err != nil {
+		return nil, fmt.Errorf("pool acquire: %w", err)
+	}
+	defer conn.Release()
+
 	qctx, cancel := context.WithTimeout(ctx, queryTO(c.cfg, req.TimeoutMS))
 	defer cancel()
 
 	start := time.Now()
-	rows, err := c.pool.Query(qctx, sql, args...)
+	rows, err := conn.Query(qctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

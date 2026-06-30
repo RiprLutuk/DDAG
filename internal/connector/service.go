@@ -8,6 +8,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -23,7 +24,6 @@ import (
 	"github.com/ddag/ddag/internal/internalauth"
 	"github.com/ddag/ddag/internal/logging"
 	"github.com/ddag/ddag/internal/metrics"
-	"github.com/ddag/ddag/internal/models"
 	"github.com/ddag/ddag/internal/secret"
 	"github.com/ddag/ddag/internal/server"
 	"github.com/ddag/ddag/internal/store"
@@ -32,8 +32,7 @@ import (
 
 type service struct {
 	dbType             string
-	store              *store.Store
-	secrets            secret.Store
+	conns              *connCache
 	registry           *connectorpool.Registry
 	metrics            *metrics.Metrics
 	log                *logging.Logger
@@ -66,7 +65,8 @@ func Run(dbType string) error {
 	reg := connectorpool.New(m)
 
 	svc := &service{
-		dbType: dbType, store: store.New(pool), secrets: sec, registry: reg, metrics: m, log: log,
+		dbType: dbType, registry: reg, metrics: m, log: log,
+		conns:              newConnCache(store.New(pool), sec, cfg.ConnCacheTTL, m, dbType),
 		internalAuthSecret: cfg.Gateway.InternalAuthSecret,
 		circuitSettings: circuit.Settings{
 			MaxRequests:      cfg.Circuit.MaxRequests,
@@ -80,6 +80,12 @@ func Run(dbType string) error {
 
 	statsCtx, cancelStats := context.WithCancel(ctx)
 	go reg.StartStatsLoop(statsCtx, 15*time.Second)
+
+	// Register zero-series for idle-safe Grafana panels (PRD v3 §8, §16.4).
+	m.ConnectorRequests.WithLabelValues("_init", dbType).Add(0)
+	m.ConnectorErr.WithLabelValues("_init", dbType).Add(0)
+	m.CircuitOpen.WithLabelValues("_init", dbType).Add(0)
+	m.CircuitHalfOpen.WithLabelValues("_init", dbType).Add(0)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /query", svc.handleQuery)
@@ -124,44 +130,47 @@ func (s *service) handleQuery(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, http.StatusBadRequest, httpx.CodeBadRequest, "invalid connection id")
 		return
 	}
-	conn, err := s.store.GetConnection(r.Context(), connID)
+	rc, err := s.conns.Resolve(r.Context(), connID)
 	if err != nil {
-		s.writeErr(w, http.StatusNotFound, httpx.CodeNotFound, "connection not found")
-		return
-	}
-	if conn.DatabaseType != s.dbType {
-		s.writeErr(w, http.StatusBadRequest, httpx.CodeBadRequest, "connection is not a "+s.dbType+" database")
-		return
-	}
-	if conn.Status != "active" {
-		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeConnectorUnavailable, "connection is disabled")
-		return
-	}
-	s.metrics.ConnectorRequests.WithLabelValues(conn.ID.String(), s.dbType).Inc()
-	breaker := s.breakerFor(conn.ID.String())
-	prevState := breaker.State()
-	if !breaker.Allow(time.Now()) {
-		s.observeCircuit(conn.ID.String(), breaker, prevState)
-		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeCircuitBreakerOpen, "Database connection temporarily unavailable (circuit open)", string(breaker.State()))
-		return
-	}
-	s.observeCircuit(conn.ID.String(), breaker, prevState)
-
-	cfg, err := s.poolConfig(r.Context(), conn)
-	if err != nil {
+		if errors.Is(err, errConnNotFound) {
+			s.writeErr(w, http.StatusNotFound, httpx.CodeNotFound, "connection not found")
+			return
+		}
+		// Secret/resolution failure is an infra fault: charge the breaker.
+		breaker := s.breakerFor(connID.String())
 		prevState := breaker.State()
 		breaker.Report(false, time.Now())
-		s.observeCircuit(conn.ID.String(), breaker, prevState)
+		s.observeCircuit(connID.String(), breaker, prevState)
+		s.metrics.ConnectorErr.WithLabelValues(connID.String(), s.dbType).Inc()
+		s.log.Error("conn_resolve_failed", "connection", connID.String(), "error", err.Error())
 		s.writeErr(w, http.StatusInternalServerError, httpx.CodeInternal, "failed to resolve connection secret", string(breaker.State()))
 		return
 	}
-	c, err := s.registry.Acquire(r.Context(), cfg, conn.ConfigVersion)
+	if rc.dbType != s.dbType {
+		s.writeErr(w, http.StatusBadRequest, httpx.CodeBadRequest, "connection is not a "+s.dbType+" database")
+		return
+	}
+	if rc.status != "active" {
+		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeConnectorUnavailable, "connection is disabled")
+		return
+	}
+	s.metrics.ConnectorRequests.WithLabelValues(rc.idStr, s.dbType).Inc()
+	breaker := s.breakerFor(rc.idStr)
+	prevState := breaker.State()
+	if !breaker.Allow(time.Now()) {
+		s.observeCircuit(rc.idStr, breaker, prevState)
+		s.writeErr(w, http.StatusServiceUnavailable, httpx.CodeCircuitBreakerOpen, "Database connection temporarily unavailable (circuit open)", string(breaker.State()))
+		return
+	}
+	s.observeCircuit(rc.idStr, breaker, prevState)
+
+	c, err := s.registry.Acquire(r.Context(), rc.cfg, rc.version)
 	if err != nil {
 		prevState := breaker.State()
 		breaker.Report(false, time.Now())
-		s.observeCircuit(conn.ID.String(), breaker, prevState)
-		s.metrics.ConnectorErr.WithLabelValues(conn.ID.String(), s.dbType).Inc()
-		s.log.Error("pool_acquire_failed", "connection", conn.Name, "error", err.Error())
+		s.observeCircuit(rc.idStr, breaker, prevState)
+		s.metrics.ConnectorErr.WithLabelValues(rc.idStr, s.dbType).Inc()
+		s.log.Error("pool_acquire_failed", "connection", rc.name, "error", err.Error())
 		code, status := classifyPoolErr(err)
 		s.writeErr(w, status, code, safePoolMessage(code), string(breaker.State()))
 		return
@@ -174,19 +183,19 @@ func (s *service) handleQuery(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		prevState := breaker.State()
 		breaker.Report(false, time.Now())
-		s.observeCircuit(conn.ID.String(), breaker, prevState)
-		s.metrics.ConnectorErr.WithLabelValues(conn.ID.String(), s.dbType).Inc()
+		s.observeCircuit(rc.idStr, breaker, prevState)
+		s.metrics.ConnectorErr.WithLabelValues(rc.idStr, s.dbType).Inc()
 		// Sanitize: do not leak raw driver errors to the caller (PRD §13.5).
-		s.log.Warn("query_failed", "connection", conn.Name, "error", err.Error())
+		s.log.Warn("query_failed", "connection", rc.name, "error", err.Error())
 		code, status := classifyQueryErr(err)
 		s.writeErr(w, status, code, "query failed", string(breaker.State()))
 		return
 	}
 	prevState = breaker.State()
 	breaker.Report(true, time.Now())
-	s.observeCircuit(conn.ID.String(), breaker, prevState)
+	s.observeCircuit(rc.idStr, breaker, prevState)
 	res.CircuitState = string(breaker.State())
-	s.metrics.QueryDuration.WithLabelValues(conn.ID.String(), s.dbType).Observe(float64(res.DurationMS) / 1000.0)
+	s.metrics.QueryDuration.WithLabelValues(rc.idStr, s.dbType).Observe(float64(res.DurationMS) / 1000.0)
 	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
@@ -264,35 +273,6 @@ func (s *service) handleTest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *service) poolConfig(ctx context.Context, conn *models.DatabaseConnection) (connectors.PoolConfig, error) {
-	password := ""
-	if conn.SecretRef != nil {
-		b, err := s.secrets.Get(ctx, *conn.SecretRef)
-		if err != nil {
-			return connectors.PoolConfig{}, err
-		}
-		password = string(b)
-	}
-	return connectors.PoolConfig{
-		ConnectionID:    conn.ID.String(),
-		DatabaseType:    conn.DatabaseType,
-		Host:            conn.Host,
-		Port:            conn.Port,
-		Database:        conn.DatabaseName,
-		ServiceName:     conn.ServiceName,
-		Schema:          conn.SchemaName,
-		Username:        conn.Username,
-		Password:        password,
-		SSLMode:         conn.SSLMode,
-		MinPool:         conn.MinPoolSize,
-		MaxPool:         conn.MaxPoolSize,
-		ConnectTimeout:  msDur(conn.ConnectionTimeoutMS, 5000),
-		QueryTimeout:    msDur(conn.QueryTimeoutMS, 30000),
-		MaxConnLifetime: msDur(conn.MaxConnLifetimeMS, 3600000),
-		MaxConnIdle:     msDur(conn.MaxConnIdleMS, 1800000),
-	}, nil
-}
-
 func (s *service) writeErr(w http.ResponseWriter, status int, code, msg string, circuitState ...string) {
 	body := map[string]any{
 		"success": false,
@@ -367,6 +347,10 @@ func msDur(ms, def int) time.Duration {
 func classifyQueryErr(err error) (code string, status int) {
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "pool acquire"):
+		// Couldn't get a pooled connection in time — the pool is exhausted, not a
+		// slow query. Surface it as such so clients/dashboards see backpressure.
+		return httpx.CodeDBPoolExhausted, http.StatusServiceUnavailable
 	case strings.Contains(msg, "context deadline exceeded"), strings.Contains(msg, "timeout"):
 		return httpx.CodeDBQueryTimeout, http.StatusRequestTimeout
 	case strings.Contains(msg, "missing value for parameter"):

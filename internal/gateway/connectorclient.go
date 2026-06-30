@@ -22,13 +22,16 @@ type ConnectorRequest struct {
 	Offset        int            `json:"offset"`
 }
 
-// ConnectorResponse is the connector→gateway query response (PRD §16.2).
+// ConnectorResponse is the connector→gateway query response (PRD §16.2). Rows is
+// kept as raw JSON so the gateway can pass the (potentially large) result array
+// straight through to the client without unmarshaling and re-marshaling every
+// row; counts come from RowCount.
 type ConnectorResponse struct {
-	Success      bool             `json:"success"`
-	DurationMS   int64            `json:"duration_ms"`
-	RowCount     int              `json:"row_count"`
-	CircuitState string           `json:"circuit_state,omitempty"`
-	Rows         []map[string]any `json:"rows"`
+	Success      bool            `json:"success"`
+	DurationMS   int64           `json:"duration_ms"`
+	RowCount     int             `json:"row_count"`
+	CircuitState string          `json:"circuit_state,omitempty"`
+	Rows         json.RawMessage `json:"rows"`
 	Error        *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`

@@ -14,7 +14,8 @@ func TestPayloadWritesCircuitStateInMeta(t *testing.T) {
 		Success:      true,
 		DurationMS:   3,
 		CircuitState: "closed",
-		Rows:         []map[string]any{{"id": "site-1"}},
+		RowCount:     1,
+		Rows:         json.RawMessage(`[{"id":"site-1"}]`),
 	}, false, 1, 1, 0)
 
 	rec := httptest.NewRecorder()
@@ -32,5 +33,33 @@ func TestPayloadWritesCircuitStateInMeta(t *testing.T) {
 	}
 	if got.Meta.CircuitState != "closed" {
 		t.Fatalf("circuit_state = %q", got.Meta.CircuitState)
+	}
+}
+
+func TestBuildPayloadListPassesRowsThrough(t *testing.T) {
+	raw := json.RawMessage(`[{"id":"a"},{"id":"b"}]`)
+	p := buildPayload(&gateway.ConnectorResponse{RowCount: 2, Rows: raw}, true, 1, 2, 0)
+	if string(p.Data) != string(raw) {
+		t.Fatalf("data = %s, want passthrough %s", p.Data, raw)
+	}
+	if p.Pagination == nil || p.Pagination.Total != 2 || !p.Pagination.HasNext {
+		t.Fatalf("pagination = %+v (want Total=2, HasNext=true from RowCount)", p.Pagination)
+	}
+}
+
+func TestBuildPayloadEmptyListIsArray(t *testing.T) {
+	p := buildPayload(&gateway.ConnectorResponse{RowCount: 0, Rows: nil}, true, 1, 10, 0)
+	if string(p.Data) != "[]" {
+		t.Fatalf("data = %s, want []", p.Data)
+	}
+	if p.Pagination.HasNext {
+		t.Fatal("HasNext should be false for an empty page")
+	}
+}
+
+func TestBuildPayloadSingleRowEmptyIsNull(t *testing.T) {
+	p := buildPayload(&gateway.ConnectorResponse{RowCount: 0, Rows: json.RawMessage(`[]`)}, false, 1, 1, 0)
+	if string(p.Data) != "null" {
+		t.Fatalf("data = %s, want null", p.Data)
 	}
 }
