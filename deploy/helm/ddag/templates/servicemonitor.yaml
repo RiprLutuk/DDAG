@@ -1,0 +1,25 @@
+{{- if .Values.serviceMonitor.enabled }}
+{{- range $name, $svc := .Values.services }}
+{{- $metrics := true }}
+{{- if hasKey $svc "metrics" }}{{- $metrics = $svc.metrics }}{{- end }}
+{{- if and $svc.enabled $metrics }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "ddag.namespace" $ }}
+  labels:
+    app: {{ $name }}
+    {{- include "ddag.labels" $ | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ $.Values.serviceMonitor.interval }}
+{{- end }}
+{{- end }}
+{{- end }}

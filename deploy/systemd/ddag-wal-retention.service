@@ -1,0 +1,20 @@
+[Unit]
+Description=Prune expired DDAG PostgreSQL WAL archive files
+After=postgresql@18-main.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+Environment=DDAG_WAL_ARCHIVE_DIR=/var/lib/postgresql/18/wal-archive
+Environment=DDAG_WAL_RETENTION_DAYS=30
+ExecStart=/usr/local/lib/ddag/prune-wal-archive.sh
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/postgresql/18/wal-archive
+
+[Install]
+WantedBy=multi-user.target

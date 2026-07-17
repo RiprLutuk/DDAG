@@ -1,0 +1,168 @@
+namespaceOverride: ""
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullPolicy: IfNotPresent
+
+config:
+  DDAG_ENV: "prod"
+  DDAG_LOG_LEVEL: "info"
+  DDAG_DB_HOST: "metadata-postgres.example.internal"
+  DDAG_DB_PORT: "5432"
+  DDAG_DB_USER: "ddag"
+  DDAG_DB_NAME: "ddag"
+  DDAG_DB_SSLMODE: "require"
+  DDAG_REDIS_ADDR: "ddag-redis:6379"
+  DDAG_TOKEN_ISSUER: "https://ddag.example.com"
+  DDAG_TOKEN_AUDIENCE: "ddag-api"
+  DDAG_TOKEN_CLOCK_SKEW: "30s"
+  DDAG_JWKS_URL: "http://auth-service:8081/.well-known/jwks.json"
+  DDAG_POLICY_MODE: "inprocess"
+  DDAG_CACHE_MODE: "inprocess"
+  DDAG_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12"
+  DDAG_RATE_LIMIT_FAIL_MODE: "open"
+  DDAG_BACKPRESSURE_QUEUE_SIZE: "32"
+  DDAG_BACKPRESSURE_TIMEOUT: "500ms"
+  DDAG_CB_MAX_REQUESTS: "1"
+  DDAG_CB_INTERVAL: "60s"
+  DDAG_CB_TIMEOUT: "30s"
+  DDAG_CB_FAILURE_THRESHOLD: "5"
+  DDAG_CB_FAILURE_RATIO: "0.6"
+  DDAG_SESSION_COOKIE_SECURE: "true"
+  DDAG_DASHBOARD_ORIGINS: "https://ddag.example.com"
+  DDAG_CONNECTOR_POSTGRES_URL: "http://connector-postgres:8090"
+  DDAG_CONNECTOR_MYSQL_URL: "http://connector-mysql:8091"
+  DDAG_CONNECTOR_ORACLE_URL: "http://connector-oracle:8092"
+  DDAG_CONNECTOR_SQLSERVER_URL: "http://connector-sqlserver:8093"
+
+secret:
+  DDAG_MASTER_KEY: "REPLACE_WITH_BASE64_32_BYTES"
+  DDAG_SESSION_SECRET: "REPLACE_WITH_RANDOM_SECRET"
+  DDAG_SUPERADMIN_PASSWORD: "REPLACE_WITH_STRONG_SUPERADMIN_PASSWORD"
+  DDAG_INTERNAL_AUTH_SECRET: "REPLACE_WITH_RANDOM_INTERNAL_HMAC_SECRET"
+  DDAG_DB_PASSWORD: "REPLACE_WITH_DB_PASSWORD"
+
+defaultResources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+services:
+  admin-backend:
+    enabled: true
+    image: { repository: "ddag-admin-backend", tag: "latest" }
+    port: 8080
+    replicas: 1
+    hpa: { enabled: false, minReplicas: 1, maxReplicas: 2, cpu: 70 }
+  auth-service:
+    enabled: true
+    image: { repository: "ddag-auth-service", tag: "latest" }
+    port: 8081
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  api-gateway:
+    enabled: true
+    image: { repository: "ddag-api-gateway", tag: "latest" }
+    port: 8082
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  policy-engine:
+    enabled: true
+    image: { repository: "ddag-policy-engine", tag: "latest" }
+    port: 8083
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  cache-service:
+    enabled: true
+    image: { repository: "ddag-cache-service", tag: "latest" }
+    port: 8084
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  worker:
+    enabled: true
+    image: { repository: "ddag-worker", tag: "latest" }
+    port: 8085
+    replicas: 1
+    hpa: { enabled: false, minReplicas: 1, maxReplicas: 2, cpu: 70 }
+  connector-postgres:
+    enabled: true
+    image: { repository: "ddag-connector-postgres", tag: "latest" }
+    port: 8090
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  connector-mysql:
+    enabled: true
+    image: { repository: "ddag-connector-mysql", tag: "latest" }
+    port: 8091
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  connector-oracle:
+    enabled: true
+    image: { repository: "ddag-connector-oracle", tag: "latest" }
+    port: 8092
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  connector-sqlserver:
+    enabled: true
+    image: { repository: "ddag-connector-sqlserver", tag: "latest" }
+    port: 8093
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 8, cpu: 70 }
+  dashboard:
+    enabled: true
+    image: { repository: "ddag-dashboard", tag: "latest" }
+    port: 3000
+    replicas: 2
+    envFrom: false
+    metrics: false
+    probes: false
+    # Dashboard API paths are same-origin and compiled into the Vite bundle.
+    env: {}
+    hpa: { enabled: false, minReplicas: 2, maxReplicas: 4, cpu: 70 }
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "96Mi"
+      limits:
+        cpu: "300m"
+        memory: "256Mi"
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ddag.example.com
+      paths:
+        - path: /admin
+          pathType: Prefix
+          service: admin-backend
+          port: 8080
+        - path: /oauth
+          pathType: Prefix
+          service: auth-service
+          port: 8081
+        - path: /.well-known
+          pathType: Prefix
+          service: auth-service
+          port: 8081
+        - path: /api
+          pathType: Prefix
+          service: api-gateway
+          port: 8082
+        - path: /
+          pathType: Prefix
+          service: dashboard
+          port: 3000
+  tls: []
+
+serviceMonitor:
+  enabled: false
+  interval: 15s
+
+pdb:
+  enabled: true
+  minAvailable: 1

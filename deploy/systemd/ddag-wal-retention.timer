@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily DDAG PostgreSQL WAL archive retention
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=ddag-wal-retention.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,52 @@
+groups:
+  - name: ddag-backup-and-postgres
+    rules:
+      - alert: DDAGLogicalBackupStale
+        expr: time() - ddag_backup_last_success_timestamp_seconds{kind="logical_backup"} > 93600
+        for: 15m
+        labels:
+          severity: critical
+          service: ddag
+        annotations:
+          summary: DDAG encrypted logical backup is stale
+          description: No successful logical backup has completed within 26 hours.
+
+      - alert: DDAGRestoreDrillStale
+        expr: time() - ddag_backup_last_success_timestamp_seconds{kind="restore_drill"} > 691200
+        for: 30m
+        labels:
+          severity: warning
+          service: ddag
+        annotations:
+          summary: DDAG restore drill is stale
+          description: No successful isolated restore drill has completed within 8 days.
+
+      - alert: DDAGWALArchiveFailure
+        expr: increase(ddag_postgres_wal_archive_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: PostgreSQL WAL archival is failing
+          description: PostgreSQL has reported one or more WAL archive failures in the last 15 minutes.
+
+      - alert: DDAGWALArchivingStale
+        expr: time() - ddag_postgres_wal_last_archived_timestamp_seconds > 3600
+        for: 15m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: PostgreSQL WAL archive activity is stale
+          description: No WAL segment has been archived for more than one hour; verify archive activity and expected write volume.
+
+      - alert: DDAGPostgresConnectionPressure
+        expr: ddag_postgres_active_connections / ddag_postgres_max_connections > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: PostgreSQL connection pressure is high
+          description: Metadata PostgreSQL has used more than 85% of its configured connection limit for 10 minutes.

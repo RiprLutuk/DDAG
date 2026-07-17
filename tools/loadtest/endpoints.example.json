@@ -1,0 +1,4 @@
+[
+  { "method": "GET", "path": "/api/v1/brim/sites/ABC123" },
+  { "method": "POST", "path": "/api/v1/brim/workorders/search", "body": { "status": "OPEN" } }
+]

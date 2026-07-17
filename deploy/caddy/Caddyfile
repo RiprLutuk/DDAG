@@ -1,0 +1,73 @@
+ddag.demo.pandanteknik.com {
+	encode gzip zstd
+
+	# API/auth handlers must precede the SPA fallback.
+	handle /grafana/* {
+		reverse_proxy localhost:3001
+	}
+	handle /grafana {
+		redir /grafana/ permanent
+	}
+	handle /api/v1/* {
+		reverse_proxy localhost:8082
+	}
+	handle /api/* {
+		reverse_proxy localhost:8080
+	}
+	handle /auth/* {
+		reverse_proxy localhost:8080
+	}
+	handle /oauth/* {
+		reverse_proxy localhost:8081
+	}
+	handle /.well-known/* {
+		reverse_proxy localhost:8081
+	}
+	handle /v1/* {
+		reverse_proxy localhost:8082
+	}
+
+	# Generated API documentation is served by the gateway. The specification
+	# itself requires a bearer token and is filtered to the caller's grants.
+	handle /openapi.json {
+		reverse_proxy localhost:8082
+	}
+	handle /openapi.yaml {
+		reverse_proxy localhost:8082
+	}
+	handle /api-catalog {
+		reverse_proxy localhost:8082
+	}
+	handle /docs {
+		reverse_proxy localhost:8082
+	}
+
+	handle /metrics {
+		reverse_proxy localhost:8080
+	}
+	handle /healthz {
+		reverse_proxy localhost:8080
+	}
+
+	handle {
+		root * /var/www/DDAG/apps/dashboard/dist
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+}
+
+filter.ppn.pandanteknik.com {
+	encode gzip zstd
+	reverse_proxy localhost:8095
+}
+
+demo.ppn.pandanteknik.com {
+	redir https://ddag.demo.pandanteknik.com{uri} permanent
+}

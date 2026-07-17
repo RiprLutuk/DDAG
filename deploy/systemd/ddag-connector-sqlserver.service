@@ -1,0 +1,23 @@
+[Unit]
+Description=DDAG SQL Server Connector
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/DDAG
+Environment=DDAG_HTTP_ADDR=127.0.0.1:8093
+ExecStart=/var/www/DDAG/bin/connector-sqlserver
+Restart=always
+RestartSec=5
+
+EnvironmentFile=/var/www/DDAG/.env
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/www/DDAG /var/log/ddag
+[Install]
+WantedBy=multi-user.target

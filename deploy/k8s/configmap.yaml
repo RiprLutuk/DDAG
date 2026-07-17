@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ddag-config
+  namespace: ddag
+data:
+  DDAG_ENV: "prod"
+  DDAG_LOG_LEVEL: "info"
+  # External metadata DB (not deployed in-cluster — connected from outside).
+  DDAG_DB_HOST: "metadata-postgres.example.internal"
+  DDAG_DB_PORT: "5432"
+  DDAG_DB_USER: "ddag"
+  DDAG_DB_NAME: "ddag"
+  DDAG_DB_SSLMODE: "require"
+  DDAG_REDIS_ADDR: "ddag-redis:6379"
+  DDAG_TOKEN_ISSUER: "https://ddag.example.com"
+  DDAG_TOKEN_AUDIENCE: "ddag-api"
+  DDAG_TOKEN_CLOCK_SKEW: "30s"
+  DDAG_JWKS_URL: "http://auth-service:8081/.well-known/jwks.json"
+  DDAG_POLICY_MODE: "inprocess"
+  DDAG_CACHE_MODE: "inprocess"
+  DDAG_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12"
+  DDAG_RATE_LIMIT_FAIL_MODE: "open"
+  DDAG_BACKPRESSURE_QUEUE_SIZE: "32"
+  DDAG_BACKPRESSURE_TIMEOUT: "500ms"
+  DDAG_CB_MAX_REQUESTS: "1"
+  DDAG_CB_INTERVAL: "60s"
+  DDAG_CB_TIMEOUT: "30s"
+  DDAG_CB_FAILURE_THRESHOLD: "5"
+  DDAG_CB_FAILURE_RATIO: "0.6"
+  DDAG_SESSION_COOKIE_SECURE: "true"
+  DDAG_DASHBOARD_ORIGINS: "https://ddag.example.com"
+  DDAG_CONNECTOR_POSTGRES_URL: "http://connector-postgres:8090"
+  DDAG_CONNECTOR_MYSQL_URL: "http://connector-mysql:8091"
+  DDAG_CONNECTOR_ORACLE_URL: "http://connector-oracle:8092"
+  DDAG_CONNECTOR_SQLSERVER_URL: "http://connector-sqlserver:8093"

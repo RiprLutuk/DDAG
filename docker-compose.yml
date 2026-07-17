@@ -1,0 +1,161 @@
+# DDAG local stack — one command brings up the control plane, data plane, and demo metadata.
+#
+#   docker compose up --build
+#   # Dashboard: http://localhost  |  Gateway: http://localhost/api/v1/...
+#
+# Override defaults in .env (quickstart.sh creates one with generated secrets).
+name: ddag
+
+x-ddag-env: &ddag-env
+  DDAG_ENV: ${DDAG_ENV:-local}
+  DDAG_LOG_LEVEL: ${DDAG_LOG_LEVEL:-info}
+  DDAG_DB_HOST: postgres
+  DDAG_DB_PORT: "5432"
+  DDAG_DB_USER: ${DDAG_DB_USER:-ddag}
+  DDAG_DB_PASSWORD: ${DDAG_DB_PASSWORD:-ddag-local-only}
+  DDAG_DB_NAME: ${DDAG_DB_NAME:-ddag}
+  DDAG_DB_SSLMODE: disable
+  DDAG_REDIS_ADDR: redis:6379
+  DDAG_MASTER_KEY: ${DDAG_MASTER_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+  DDAG_SESSION_SECRET: ${DDAG_SESSION_SECRET:-change-me-before-production}
+  DDAG_SESSION_COOKIE_SECURE: "false"
+  DDAG_SUPERADMIN_PASSWORD: ${DDAG_SUPERADMIN_PASSWORD:-Admin#12345}
+  DDAG_TOKEN_ISSUER: ${DDAG_TOKEN_ISSUER:-http://localhost}
+  DDAG_TOKEN_AUDIENCE: ${DDAG_TOKEN_AUDIENCE:-ddag-api}
+  DDAG_JWKS_URL: http://auth-service:8081/.well-known/jwks.json
+  DDAG_DASHBOARD_ORIGINS: ${DDAG_DASHBOARD_ORIGINS:-http://localhost}
+  DDAG_POLICY_MODE: ${DDAG_POLICY_MODE:-inprocess}
+  DDAG_CACHE_MODE: ${DDAG_CACHE_MODE:-inprocess}
+  DDAG_RATE_LIMIT_FAIL_MODE: ${DDAG_RATE_LIMIT_FAIL_MODE:-closed}
+  DDAG_CONNECTOR_POSTGRES_URL: http://connector-postgres:8090
+  DDAG_CONNECTOR_MYSQL_URL: http://connector-mysql:8091
+  DDAG_CONNECTOR_ORACLE_URL: http://connector-oracle:8092
+  DDAG_CONNECTOR_SQLSERVER_URL: http://connector-sqlserver:8093
+
+x-service: &service
+  restart: unless-stopped
+  build:
+    context: .
+    dockerfile: deploy/docker/Dockerfile
+  environment: *ddag-env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DDAG_DB_USER:-ddag}
+      POSTGRES_PASSWORD: ${DDAG_DB_PASSWORD:-ddag-local-only}
+      POSTGRES_DB: ${DDAG_DB_NAME:-ddag}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Initializes schema, roles, and the local administrator on every fresh volume.
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args: { SERVICE: migrate }
+    entrypoint: ["/usr/local/bin/ddag-service", "--seed"]
+    environment: *ddag-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  admin-backend:
+    <<: *service
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: admin-backend } }
+
+  auth-service:
+    <<: *service
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: auth-service } }
+
+  api-gateway:
+    <<: *service
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: api-gateway } }
+    depends_on:
+      auth-service:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  connector-postgres:
+    <<: *service
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-postgres } }
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dashboard
+    restart: unless-stopped
+    depends_on:
+      admin-backend:
+        condition: service_started
+
+  caddy:
+    image: caddy:2.8-alpine
+    ports:
+      - "${DDAG_HTTP_PORT:-80}:80"
+    volumes:
+      - ./deploy/docker/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      dashboard:
+        condition: service_started
+      admin-backend:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      api-gateway:
+        condition: service_started
+    restart: unless-stopped
+
+  # Optional source connectors: docker compose --profile connectors up --build
+  connector-mysql:
+    <<: *service
+    profiles: [connectors]
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-mysql } }
+  connector-oracle:
+    <<: *service
+    profiles: [connectors]
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-oracle } }
+  connector-sqlserver:
+    <<: *service
+    profiles: [connectors]
+    build: { context: ., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: connector-sqlserver } }
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

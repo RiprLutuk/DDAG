@@ -1,0 +1,34 @@
+[Unit]
+Description=DDAG Auth Service
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/var/www/DDAG
+Environment=DDAG_HTTP_ADDR=127.0.0.1:8081
+Environment=DDAG_ENV=staging
+Environment=DDAG_LOG_LEVEL=info
+Environment=DDAG_DB_HOST=127.0.0.1
+Environment=DDAG_DB_PORT=5432
+Environment=DDAG_DB_USER=lutuk
+Environment=DDAG_DB_PASSWORD=__REPLACE_ME__
+Environment=DDAG_DB_NAME=ddag
+Environment=DDAG_DB_SSLMODE=disable
+Environment=DDAG_REDIS_ADDR=127.0.0.1:6379
+Environment=DDAG_MASTER_KEY=__REPLACE_ME__
+Environment=DDAG_TOKEN_ISSUER=https://ddag.demo.pandanteknik.com
+Environment=DDAG_JWKS_URL=http://127.0.0.1:8081/.well-known/jwks.json
+ExecStart=/var/www/DDAG/bin/auth-service
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/www/DDAG /var/log/ddag
+[Install]
+WantedBy=multi-user.target

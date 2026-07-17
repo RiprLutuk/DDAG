@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly DDAG isolated restore drill
+
+[Timer]
+OnCalendar=Sun *-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=ddag-restore-drill.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,370 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-backend
+  namespace: ddag
+  labels: { app: admin-backend, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: admin-backend } }
+  template:
+    metadata:
+      labels: { app: admin-backend }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: admin-backend
+          image: ddag-admin-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8080 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: ddag
+  labels: { app: auth-service, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: auth-service } }
+  template:
+    metadata:
+      labels: { app: auth-service }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8081"
+    spec:
+      containers:
+        - name: auth-service
+          image: ddag-auth-service:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8081 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: ddag
+  labels: { app: api-gateway, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: api-gateway } }
+  template:
+    metadata:
+      labels: { app: api-gateway }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8082"
+    spec:
+      containers:
+        - name: api-gateway
+          image: ddag-api-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8082 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8082 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8082 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-engine
+  namespace: ddag
+  labels: { app: policy-engine, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: policy-engine } }
+  template:
+    metadata:
+      labels: { app: policy-engine }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8083"
+    spec:
+      containers:
+        - name: policy-engine
+          image: ddag-policy-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8083 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8083 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8083 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache-service
+  namespace: ddag
+  labels: { app: cache-service, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: cache-service } }
+  template:
+    metadata:
+      labels: { app: cache-service }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8084"
+    spec:
+      containers:
+        - name: cache-service
+          image: ddag-cache-service:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8084 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8084 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8084 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: ddag
+  labels: { app: worker, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: worker } }
+  template:
+    metadata:
+      labels: { app: worker }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8085"
+    spec:
+      containers:
+        - name: worker
+          image: ddag-worker:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8085 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8085 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connector-postgres
+  namespace: ddag
+  labels: { app: connector-postgres, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: connector-postgres } }
+  template:
+    metadata:
+      labels: { app: connector-postgres }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8090"
+    spec:
+      containers:
+        - name: connector-postgres
+          image: ddag-connector-postgres:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8090 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8090 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8090 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connector-mysql
+  namespace: ddag
+  labels: { app: connector-mysql, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: connector-mysql } }
+  template:
+    metadata:
+      labels: { app: connector-mysql }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8091"
+    spec:
+      containers:
+        - name: connector-mysql
+          image: ddag-connector-mysql:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8091 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8091 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8091 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connector-oracle
+  namespace: ddag
+  labels: { app: connector-oracle, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: connector-oracle } }
+  template:
+    metadata:
+      labels: { app: connector-oracle }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8092"
+    spec:
+      containers:
+        - name: connector-oracle
+          image: ddag-connector-oracle:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8092 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8092 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8092 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connector-sqlserver
+  namespace: ddag
+  labels: { app: connector-sqlserver, app.kubernetes.io/part-of: ddag }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: connector-sqlserver } }
+  template:
+    metadata:
+      labels: { app: connector-sqlserver }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8093"
+    spec:
+      containers:
+        - name: connector-sqlserver
+          image: ddag-connector-sqlserver:latest
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 8093 } ]
+          envFrom:
+            - configMapRef: { name: ddag-config }
+            - secretRef: { name: ddag-secrets }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8093 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8093 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }

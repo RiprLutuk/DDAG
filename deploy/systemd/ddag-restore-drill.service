@@ -1,0 +1,22 @@
+[Unit]
+Description=DDAG isolated PostgreSQL encrypted backup restore drill
+Wants=network-online.target
+After=network-online.target postgresql@18-main.service ddag-logical-backup.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/var/www/DDAG
+EnvironmentFile=/etc/ddag/backup-runner.env
+Environment=DDAG_BACKUP_ROOT=/var/www/DDAG/var/backups
+ExecStart=/var/www/DDAG/bin/backup-runner -drill
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/www/DDAG/var/backups
+
+[Install]
+WantedBy=multi-user.target

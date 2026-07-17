@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose an improvement to DDAG
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user or operational problem, not only the proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Gateway, Connector, Auth/policy, Dashboard, OpenAPI/QUERY, Deployment, Documentation, Other]
+    validations:
+      required: true

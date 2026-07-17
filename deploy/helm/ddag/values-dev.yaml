@@ -1,0 +1,33 @@
+config:
+  DDAG_ENV: "dev"
+  DDAG_DB_HOST: "host.docker.internal"
+  DDAG_DB_PORT: "1921"
+  DDAG_DB_USER: "lutuk"
+  DDAG_DB_NAME: "ddag"
+  DDAG_DB_SSLMODE: "disable"
+  DDAG_REDIS_ADDR: "redis:6379"
+  DDAG_TOKEN_ISSUER: "https://ddag.local"
+  DDAG_JWKS_URL: "http://auth-service:8081/.well-known/jwks.json"
+  DDAG_SESSION_COOKIE_SECURE: "false"
+  DDAG_DASHBOARD_ORIGINS: "http://localhost:3000"
+  DDAG_TRUSTED_PROXIES: ""
+
+secret:
+  DDAG_MASTER_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  DDAG_SESSION_SECRET: "dev-insecure-session-secret-change-me"
+  DDAG_SUPERADMIN_PASSWORD: "Admin#12345"
+  DDAG_INTERNAL_AUTH_SECRET: ""
+  DDAG_DB_PASSWORD: ""
+
+services:
+  auth-service: { replicas: 1, hpa: { enabled: false, minReplicas: 1, maxReplicas: 1, cpu: 70 } }
+  api-gateway: { replicas: 1, hpa: { enabled: false, minReplicas: 1, maxReplicas: 1, cpu: 70 } }
+  policy-engine: { replicas: 1, hpa: { enabled: false, minReplicas: 1, maxReplicas: 1, cpu: 70 } }
+  cache-service: { replicas: 1, hpa: { enabled: false, minReplicas: 1, maxReplicas: 1, cpu: 70 } }
+  connector-postgres: { replicas: 1, hpa: { enabled: false, minReplicas: 1, maxReplicas: 1, cpu: 70 } }
+  connector-mysql: { enabled: false }
+  connector-oracle: { enabled: false }
+  connector-sqlserver: { enabled: false }
+
+pdb:
+  enabled: false

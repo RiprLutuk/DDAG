@@ -1,0 +1,13 @@
+# DDAG admin dashboard (Vue 3 + Vite static SPA).
+# Build: docker build -f deploy/docker/Dockerfile.dashboard -t ddag-dashboard .
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY apps/dashboard/package.json apps/dashboard/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY apps/dashboard/ ./
+RUN pnpm run build
+
+FROM caddy:2.8-alpine AS runtime
+COPY deploy/docker/Caddyfile.dashboard /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+EXPOSE 3000

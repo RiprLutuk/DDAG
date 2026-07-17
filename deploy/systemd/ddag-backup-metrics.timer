@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh DDAG backup and PostgreSQL metrics every minute
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=1m
+Persistent=true
+RandomizedDelaySec=10s
+Unit=ddag-backup-metrics.service
+
+[Install]
+WantedBy=timers.target

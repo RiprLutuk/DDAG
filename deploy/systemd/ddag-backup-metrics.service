@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh DDAG backup and PostgreSQL Prometheus metrics
+After=postgresql@18-main.service prometheus-node-exporter.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/ddag/update-backup-metrics.sh
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/prometheus/node-exporter
+
+[Install]
+WantedBy=multi-user.target

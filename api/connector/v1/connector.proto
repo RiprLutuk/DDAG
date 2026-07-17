@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package ddag.connector.v1;
+
+option go_package = "github.com/ddag/ddag/api/connector/v1;connectorv1";
+
+// ConnectorService is the internal, binary transport between a gateway replica
+// and a database-type connector. It is never exposed on a public listener.
+service ConnectorService {
+  rpc Query(QueryRequest) returns (QueryResponse);
+}
+
+message QueryRequest {
+  string request_id = 1;
+  string connection_id = 2;
+  string query_template = 3;
+  bytes parameters_json = 4;
+  int32 timeout_ms = 5;
+  int32 limit = 6;
+  int32 offset = 7;
+}
+
+message QueryResponse {
+  bool success = 1;
+  int64 duration_ms = 2;
+  int32 row_count = 3;
+  string circuit_state = 4;
+  bytes rows_json = 5;
+  ErrorDetail error = 6;
+}
+
+message ErrorDetail {
+  string code = 1;
+  string message = 2;
+}

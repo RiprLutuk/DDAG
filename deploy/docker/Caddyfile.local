@@ -1,0 +1,33 @@
+:80 {
+    encode zstd gzip
+
+    # Keep API routes ahead of the dashboard SPA fallback.
+    handle /api/v1/* {
+        reverse_proxy api-gateway:8082
+    }
+    handle /api/* {
+        reverse_proxy admin-backend:8080
+    }
+    handle /auth/* {
+        reverse_proxy admin-backend:8080
+    }
+    handle /oauth/* {
+        reverse_proxy auth-service:8081
+    }
+    handle /.well-known/* {
+        reverse_proxy auth-service:8081
+    }
+    handle /openapi.json {
+        reverse_proxy api-gateway:8082
+    }
+    handle /openapi.yaml {
+        reverse_proxy api-gateway:8082
+    }
+    handle /healthz {
+        reverse_proxy admin-backend:8080
+    }
+
+    handle {
+        reverse_proxy dashboard:3000
+    }
+}

@@ -1,0 +1,24 @@
+[Unit]
+Description=DDAG PostgreSQL Connector
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/DDAG
+Environment=DDAG_HTTP_ADDR=127.0.0.1:8090
+ExecStart=/var/www/DDAG/bin/connector-postgres
+Restart=always
+RestartSec=5
+
+EnvironmentFile=/var/www/DDAG/.env
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/www/DDAG /var/log/ddag
+[Install]
+WantedBy=multi-user.target

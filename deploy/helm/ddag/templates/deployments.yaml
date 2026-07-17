@@ -1,0 +1,73 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $metrics := true }}
+{{- if hasKey $svc "metrics" }}{{- $metrics = $svc.metrics }}{{- end }}
+{{- $envFrom := true }}
+{{- if hasKey $svc "envFrom" }}{{- $envFrom = $svc.envFrom }}{{- end }}
+{{- $probes := true }}
+{{- if hasKey $svc "probes" }}{{- $probes = $svc.probes }}{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "ddag.namespace" $ }}
+  labels:
+    app: {{ $name }}
+    {{- include "ddag.labels" $ | nindent 4 }}
+spec:
+  replicas: {{ default 1 $svc.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        {{- include "ddag.labels" $ | nindent 8 }}
+      {{- if $metrics }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ $svc.port | quote }}
+      {{- end }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: "{{ $svc.image.repository }}:{{ default $.Chart.AppVersion $svc.image.tag }}"
+          imagePullPolicy: {{ $.Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+          {{- if $envFrom }}
+          envFrom:
+            - configMapRef:
+                name: ddag-config
+            - secretRef:
+                name: ddag-secrets
+          {{- end }}
+          {{- with $svc.env }}
+          env:
+            {{- range $key, $value := . }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          {{- if $probes }}
+          readinessProbe:
+            httpGet:
+              path: {{ default "/readyz" $svc.readinessPath }}
+              port: {{ $svc.port }}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: {{ default "/healthz" $svc.livenessPath }}
+              port: {{ $svc.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          {{- end }}
+          resources:
+            {{- toYaml (default $.Values.defaultResources $svc.resources) | nindent 12 }}
+{{- end }}
+{{- end }}

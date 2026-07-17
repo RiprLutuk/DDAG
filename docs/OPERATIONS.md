@@ -1,0 +1,240 @@
+# DDAG Operations Guide
+
+## Configuration
+
+All services are configured by environment variables (12-factor). The full list
+with defaults is in [configs/.env.example](../configs/.env.example). Key groups:
+
+| Group | Vars |
+|---|---|
+| Metadata DB | `DDAG_DB_HOST/PORT/USER/PASSWORD/NAME/SSLMODE`, pool: `DDAG_DB_MIN_CONNS`, `DDAG_DB_MAX_CONNS`, `DDAG_DB_MAX_CONN_LIFETIME`, `DDAG_DB_MAX_CONN_IDLE`, `DDAG_DB_CONNECT_TIMEOUT` |
+| Redis | `DDAG_REDIS_ADDR`, `DDAG_REDIS_PASSWORD`, `DDAG_REDIS_DB` |
+| Secrets | `DDAG_MASTER_KEY` (base64 of 32 bytes — `openssl rand -base64 32`) |
+| OAuth2 | `DDAG_TOKEN_ISSUER`, `DDAG_TOKEN_AUDIENCE`, `DDAG_TOKEN_CLOCK_SKEW`, `DDAG_ACCESS_TOKEN_TTL`, `DDAG_REFRESH_TOKEN_TTL`, `DDAG_JWKS_URL`, `DDAG_JWKS_REFRESH` |
+| Dashboard session | `DDAG_SESSION_SECRET`, `DDAG_SESSION_TTL`, `DDAG_SESSION_COOKIE_SECURE`, `DDAG_MAX_FAILED_LOGIN`, `DDAG_LOCKOUT_WINDOW`, `DDAG_DASHBOARD_ORIGINS` |
+| Gateway | `DDAG_POLICY_MODE`, `DDAG_CACHE_MODE`, `DDAG_ROUTE_REFRESH`, `DDAG_DEFAULT_LIMIT`, `DDAG_MAX_LIMIT`, `DDAG_TRUSTED_PROXIES`, `DDAG_RATE_LIMIT_FAIL_MODE`, `DDAG_INTERNAL_AUTH_SECRET`, `DDAG_BACKPRESSURE_QUEUE_SIZE`, `DDAG_BACKPRESSURE_TIMEOUT`, `DDAG_CONNECTOR_*_URL` |
+| Circuit breaker | `DDAG_CB_MAX_REQUESTS`, `DDAG_CB_INTERVAL`, `DDAG_CB_TIMEOUT`, `DDAG_CB_FAILURE_THRESHOLD`, `DDAG_CB_FAILURE_RATIO` |
+| Per-service | `DDAG_HTTP_ADDR` (defaults to each service's conventional port) |
+
+> **Production checklist:** set a real `DDAG_MASTER_KEY` and `DDAG_SESSION_SECRET`,
+> `DDAG_SESSION_COOKIE_SECURE=true`, set `DDAG_INTERNAL_AUTH_SECRET`, configure
+> `DDAG_TRUSTED_PROXIES` to your ingress/load-balancer CIDRs, restrict
+> `DDAG_DASHBOARD_ORIGINS`, enable TLS at the ingress, and point `DDAG_DB_*` at a
+> backed-up PostgreSQL. With `DDAG_ENV=prod`, services refuse to boot if the
+> master/session secrets are still defaults or secure cookies are disabled.
+
+## First-time setup
+
+```bash
+make build
+make seed          # creates DB 'ddag', migrates, seeds roles/super-admin + demo data
+```
+
+`make seed` runs `migrate --demo`, which:
+1. applies all migrations,
+2. seeds the permission catalog, the seven system roles, default scopes, and the
+   `superadmin` user (password from `DDAG_SUPERADMIN_PASSWORD`, default
+   `Admin#12345`),
+3. provisions a real `ddag_demo` source database with sample rows, registers a
+   `demo-postgres` connection, two published APIs, and the `app-brim` client
+   (secret from `DDAG_DEMO_CLIENT_SECRET`, default `demo-secret-brim-001`).
+
+For production, use `make seed-core` (no demo data). `admin-backend` also
+auto-applies migrations and core seed on boot when `DDAG_AUTO_MIGRATE=true`.
+
+Re-running any seed is idempotent.
+
+## Running
+
+- **Local processes:** `make dev` (background) / `make dev-stop` / `make dev-logs`.
+  Run additional services directly: `make run-policy`, `make run-cache`,
+  `make run-worker`, `make run-connector-postgres`, etc.
+- **Docker:** `docker compose up -d --build`, then
+  `docker compose run --rm migrate --demo`.
+- **VPS / bare metal:** use [docs/DEPLOY_VPS.md](DEPLOY_VPS.md) for the
+  systemd + Caddy runbook. The recommended layout uses separate public hostnames
+  for the dashboard/control plane and gateway/data plane.
+- **Kubernetes:** `kubectl apply -k deploy/k8s` (edit `secret.yaml` and
+  `configmap.yaml` first), or use the Helm chart:
+  `helm upgrade --install ddag deploy/helm/ddag -n ddag --create-namespace`.
+  Profiles are available with `-f deploy/helm/ddag/values-dev.yaml`,
+  `values-production.yaml`, and `values-enterprise.yaml`.
+
+## Scaling
+
+Stateless and horizontally scalable: `api-gateway`, `auth-service`,
+`policy-engine`, `cache-service`, and all `connector-*`. HPAs for these are in
+[deploy/k8s/hpa.yaml](../deploy/k8s/hpa.yaml) (CPU target 70%, up to 8 replicas).
+Rate limiting and cache are Redis-backed, so they stay correct across replicas.
+`admin-backend`, `worker` run at low replica counts.
+
+Scale connectors independently per database type based on that source's load —
+e.g. more `connector-postgres` replicas without touching Oracle.
+
+## Health & monitoring
+
+Every service exposes:
+
+- `GET /healthz` — liveness
+- `GET /readyz` — readiness (checks DB/Redis dependencies)
+- `GET /metrics` — Prometheus metrics (`ddag_*`)
+
+High-concurrency metrics:
+
+| Metric | Meaning |
+|---|---|
+| `ddag_cache_hits_total` / `ddag_cache_misses_total` | Gateway response-cache hit/miss counters by route |
+| `ddag_singleflight_active` | Active cache-fill calls protected by singleflight |
+| `ddag_singleflight_shared_total` / `ddag_singleflight_shared` | Requests that reused another in-flight cache fill; legacy name retained during migration |
+| `ddag_metadata_sync_total` | Metadata refreshes triggered by Redis Pub/Sub |
+| `ddag_connector_requests_total` / `ddag_connector_errors_total` | Connector request/error counters by connection and DB type |
+| `ddag_circuit_state` | Circuit state by connection (`0=closed`, `1=half-open`, `2=open`) |
+| `ddag_circuit_open_total` | Circuit open transitions |
+| `ddag_circuit_half_open_total` | Circuit half-open transitions |
+| `ddag_db_query_duration_seconds_bucket` | Source DB query latency histogram by connection and DB type |
+| `ddag_db_pool_active` / `ddag_db_pool_idle` | Runtime source DB pool usage by connection |
+| `ddag_pool_max_connections` | Configured max source DB pool size by connection |
+| `ddag_db_pool_wait_count` / `ddag_db_pool_wait_duration_ms` | Pool wait pressure by connection |
+| `ddag_db_pool_timeout_count` | Pool acquire timeout/cancel count by connection |
+| `ddag_queue_depth` | Gateway backpressure queue depth |
+| `ddag_queued_requests_total` | Requests admitted to the queue |
+| `ddag_queue_timeout_total` / `ddag_rejected_requests_total` | Backpressure timeouts and rejects |
+
+All DDAG metrics include `service` as a Prometheus const label. Code call sites
+only pass the metric-specific variable labels such as `route`, `connection`, and
+`db_type`.
+
+Prometheus scrape config: [deploy/prometheus/prometheus.yml](../deploy/prometheus/prometheus.yml).
+Grafana datasource + dashboard auto-provision from
+[deploy/grafana](../deploy/grafana). The overview dashboard includes request
+rate, p95 latency, 4xx/5xx errors, cache hit ratio, token issue/fail/revoke,
+source-DB query p95, pool active/idle/max, pool pressure, pool wait/timeout,
+connector request/error rate, circuit breaker state/transitions, security
+events, gateway queue events/depth, and singleflight activity. Aggregate panels
+use idle-safe PromQL where an empty healthy state should read as zero.
+
+## Routine operations
+
+- **Add a source database:** Dashboard → Database Connections → New → fill host/
+  port/credentials and pool sizes → **Test Connection** → Save. The secret is
+  envelope-encrypted; the connection gets a health status.
+- **Publish an API:** Dashboard → API Management → Create → pick a connection,
+  write a `:param` SQL template, declare parameters, set scope + limits → **Test
+  Query** → Save Draft → **Publish**. Publishing runs the safety validator; list
+  calls are paginated at SQL level with connector-specific `LIMIT/OFFSET` or
+  `OFFSET/FETCH` syntax.
+- **Build a safe query:** API Management can store `response_mapping.query_builder`
+  metadata for whitelisted filters, sort columns, inner/left joins, and
+  aggregation. Use SQL Preview before Publish; Explain is available for
+  PostgreSQL/MySQL connectors.
+- **Grant a client:** Dashboard → Clients → New (secret shown once) → assign
+  scopes + APIs + rate limit + IP whitelist.
+- **Rotate a client secret:** Clients → Rotate (new secret shown once; the
+  client's refresh tokens are revoked).
+- **Rotate the JWT signing key:** generate a new key in `jwt_signing_keys` and
+  mark it active; old keys remain in JWKS until their tokens expire, then retire.
+- **Purge cache:** Dashboard → Cache → Purge (per API) or Purge All.
+- **Inspect circuit breakers:** Dashboard → Monitoring shows each connection's
+  circuit state. The backend endpoint is `GET /api/circuit-breakers` and
+  requires `view_circuit_state`.
+- **Inspect pool usage:** Dashboard → Connections/Monitoring show active, idle,
+  max, wait, and timeout counters via `GET /api/pool-stats`.
+
+## Backup & DR
+
+- Back up the **metadata PostgreSQL** regularly (it holds users, clients, API
+  definitions, policy, encrypted secrets, audit). This is the source of truth.
+- Store `DDAG_MASTER_KEY` in a secret manager and back it up separately —
+  without it, encrypted secrets cannot be decrypted.
+- Redis holds cache + rate-limit counters only; it can be rebuilt (configure
+  persistence/HA per environment for smoother failover).
+- See [Backup, Recovery, and PITR Runbook](BACKUP_RECOVERY.md) for encrypted
+  backup scheduling, restore-drill evidence, WAL/PITR operations, monitoring,
+  alert rules, and the documented offsite-copy prerequisite.
+
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| `401` from gateway | Missing/expired/invalid token; check `auth-service` and JWKS reachability |
+| `403 FORBIDDEN` | Token lacks the API's scope, client not granted the API, or IP not whitelisted |
+| `404 API_NOT_FOUND` | API not published, or route table not yet refreshed (`DDAG_ROUTE_REFRESH`) |
+| `408 DB_QUERY_TIMEOUT` | Source query exceeded the connection's query timeout |
+| `429 RATE_LIMITED` | Client/API/IP rate limit hit (see `ddag_rate_limited_total`) |
+| `502 CONNECTOR_UNAVAILABLE` | Connector service is down, not configured, or returned invalid data |
+| `503 DB_POOL_EXHAUSTED` | Source DB pool is full; lower burst traffic or tune pool/backpressure |
+| `503 BACKPRESSURE_LIMIT` | Gateway queue timed out or is saturated |
+| `503 CIRCUIT_BREAKER_OPEN` | Source connection is temporarily disabled by circuit breaker |
+| `503` when Redis is down | `DDAG_RATE_LIMIT_FAIL_MODE=closed`; use `open` for availability-priority fail-open behavior |
+| Dashboard can't log in | Check `DDAG_DASHBOARD_ORIGINS` (CORS) and that `admin-backend` migrated/seeded |
+| `too many failed attempts acquiring connection` | A source connection's pool can't connect — verify host/credentials via Test Connection |
+
+## API consumer docs
+
+The API gateway exposes generated documentation from published metadata:
+
+- `GET /openapi.json` — OpenAPI 3.0 JSON.
+- `GET /openapi.yaml` — OpenAPI 3.0 YAML.
+- `GET /docs` — Swagger UI shell.
+- `GET /api-catalog` — JSON catalog of published APIs.
+
+DDAG supports native `QUERY` requests per RFC 10008. Because OpenAPI 3.0 has no
+`query` operation, generated contracts expose these as `post` plus
+`x-ddag-http-method: QUERY`; DDAG Swagger UI displays and executes them as native
+`QUERY`. Client-generator adapters, preflight probes, and edge requirements are
+documented in [HTTP QUERY compatibility](HTTP_QUERY.md).
+
+When a bearer token is provided, catalog generation is filtered to scopes carried
+by the token. The generated spec does not expose SQL templates or database
+secrets.
+
+Logs are structured JSON with a propagated `request_id`; grep by it to trace a
+request across services.
+
+## v3 query builder
+
+Optional builder metadata is stored in `api_definitions.response_mapping`:
+
+```json
+{
+  "query_builder": {
+    "base_table": "karyawan",
+    "select": ["karyawan.id", "karyawan.nama", "COUNT(t.id) AS total_transaksi"],
+    "joins": [
+      {
+        "type": "left",
+        "table": "transaksi",
+        "alias": "t",
+        "on": { "left": "karyawan.id", "operator": "=", "right": "t.karyawan_id" }
+      }
+    ],
+    "filters": [
+      { "name": "status", "column": "karyawan.status", "operators": ["eq", "in"] },
+      { "name": "nama", "column": "karyawan.nama", "operators": ["like", "eq"] }
+    ],
+    "sortable_columns": [
+      { "name": "created_at", "column": "karyawan.created_at" }
+    ],
+    "group_by": ["karyawan.id", "karyawan.nama"]
+  }
+}
+```
+
+Values from request query params are always converted into named bind
+parameters before reaching a connector.
+
+## v3 load tests
+
+See [docs/TESTING_V3.md](TESTING_V3.md) for token generation, endpoint export,
+Python no-dependency load tests, k6 runs, and markdown report generation.
+
+## Release checks
+
+DDAG does not use hosted GitHub Actions CI. Run the following checks from a
+trusted local workstation or deployment host before a release:
+
+- Go formatting, build, `go vet`, lint/security checks, and unit tests.
+- Integration tests with reachable Redis and PostgreSQL.
+- `cd apps/dashboard && pnpm install --frozen-lockfile && pnpm audit --prod --audit-level=moderate && pnpm run build`.
+- Helm lint/render for each deployment profile and Kustomize render.
+- Gateway/dashboard Docker builds and image vulnerability scans when Docker is available.

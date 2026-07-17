@@ -1,0 +1,50 @@
+# Binaries
+/bin/
+*.exe
+*.test
+*.out
+
+# Local runtime
+/.run/
+*.log
+*.pid
+
+# Env / secrets
+.env
+.env.local
+.env.demo
+*.local.env
+
+# Go
+/vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Node / Vite
+node_modules/
+apps/dashboard/dist/
+.DS_Store
+
+# Editor
+.idea/
+*.swp
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# Stray root-level go build output (use ./bin via make build)
+/connector-postgres
+/admin-backend
+/auth-service
+/api-gateway
+/policy-engine
+/cache-service
+/worker
+/migrate
+/scripts/loadtest*
+
+# Local binary backups (from deploy scripts)
+/backups/
+var/
