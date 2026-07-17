@@ -85,10 +85,26 @@ function toggle(list: string[], v: string) {
   const i = list.indexOf(v); i >= 0 ? list.splice(i, 1) : list.push(v)
 }
 function copy(v: string) { navigator.clipboard?.writeText(v); toast.info('Copied to clipboard') }
+
+const tokenEndpoint = ref('https://ddag.demo.pandanteknik.com/oauth/token')
+onMounted(() => {
+  if (typeof window !== 'undefined') {
+    tokenEndpoint.value = `${window.location.origin}/oauth/token`
+  }
+})
 </script>
 
 <template>
   <p class="page-desc">OAuth2 client applications. Each gets its own credential, scopes, API grants, and limits.</p>
+  
+  <div class="card" style="margin-bottom: 20px; padding: 16px; background-color: var(--surface); border: 1px solid var(--border);">
+    <div style="font-weight: 500; margin-bottom: 8px;"><Icon name="terminal" /> How to get an Access Token</div>
+    <div class="faint" style="font-size: 13px; margin-bottom: 12px;">Clients can exchange their credentials for a JWT bearer token by calling the token endpoint via Client Credentials grant.</div>
+    <pre style="background: var(--bg); padding: 12px; border-radius: 6px; font-size: 13px; overflow-x: auto; border: 1px solid var(--border);">curl -X POST {{ tokenEndpoint }} \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=YOUR_CLIENT_ID&client_secret=YOUR_SECRET"</pre>
+  </div>
+
   <div class="toolbar compact-mobile"><div class="spacer" /><button class="btn primary" @click="openCreate">+ New Client</button></div>
 
   <UiTable :columns="columns" :rows="rows" :loading="loading" has-actions remote v-bind="table" empty="No clients yet." @query="queryTable">

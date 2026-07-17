@@ -17,7 +17,7 @@ watch(sidebarCollapsed, (collapsed) => {
 
 watch(() => route.path, () => { mobileNavOpen.value = false })
 
-interface NavItem { to: string; label: string; icon: string; perms?: string[] }
+interface NavItem { to: string; label: string; icon: string; perms?: string[]; external?: boolean }
 interface NavGroup { title: string; items: NavItem[] }
 
 const groups: NavGroup[] = [
@@ -49,6 +49,7 @@ const groups: NavGroup[] = [
     ],
   },
   { title: 'System', items: [{ to: '/settings', label: 'Settings', icon: 'settings' }] },
+  { title: 'Developers', items: [{ to: '/docs', label: 'OpenAPI Docs', icon: 'terminal', external: true }] },
 ]
 
 const visibleGroups = computed(() =>
@@ -80,9 +81,17 @@ const title = computed(() => (route.meta.title as string) || 'DDAG')
       <nav class="nav" aria-label="Main navigation">
         <template v-for="g in visibleGroups" :key="g.title">
           <div class="nav-section">{{ g.title }}</div>
-          <RouterLink v-for="i in g.items" :key="i.to" :to="i.to" :class="{ active: isActive(i.to) }" :title="i.label">
+          <component
+            v-for="i in g.items"
+            :key="i.to"
+            :is="i.external ? 'a' : 'RouterLink'"
+            :[i.external?'href':'to']="i.to"
+            :[i.external?'target':'']="i.external ? '_blank' : null"
+            :class="{ active: isActive(i.to) }"
+            :title="i.label"
+          >
             <span class="ico"><Icon :name="i.icon" /></span><span class="nav-label">{{ i.label }}</span>
-          </RouterLink>
+          </component>
         </template>
       </nav>
 

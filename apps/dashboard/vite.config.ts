@@ -17,4 +17,9 @@ const dashboardAutoImports = (): Plugin => ({
 export default defineConfig({
   plugins: [vue(), dashboardAutoImports()],
   build: { outDir: 'dist', emptyOutDir: true },
+  preview: {
+    allowedHosts: ['ddag.demo.pandanteknik.com', 'lutuk.demo.pandanteknik.com'],
+    host: '127.0.0.1',
+    port: 3000,
+  },
 })
