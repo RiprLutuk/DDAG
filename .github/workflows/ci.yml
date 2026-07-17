@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -68,7 +68,7 @@ jobs:
           --health-retries=3
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.21'
       - run: go test -v -tags=integration -count=1 ./internal/connectors/ -run TestMySQLConnectorIntegration
@@ -93,7 +93,7 @@ jobs:
           --health-retries=3
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.21'
       - run: go test -v -tags=integration -count=1 ./internal/connectors/ -run TestSQLServerConnectorIntegration
@@ -119,7 +119,7 @@ jobs:
           --health-retries=3
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.21'
       - run: go test -v -tags=integration -count=1 ./internal/connectors/ -run TestOracleConnectorIntegration
