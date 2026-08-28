@@ -1,10 +1,11 @@
 {
-  "cleanUrls": true,
   "rewrites": [
-    { "source": "/auth/(.*)", "destination": "https://ddag.demo.pandanteknik.com/auth/$1" },
-    { "source": "/api/(.*)", "destination": "https://ddag.demo.pandanteknik.com/api/$1" },
-    { "source": "/oauth/(.*)", "destination": "https://ddag.demo.pandanteknik.com/oauth/$1" },
-    { "source": "/.well-known/(.*)", "destination": "https://ddag.demo.pandanteknik.com/.well-known/$1" },
+    { "source": "/auth/:match*", "destination": "https://ddag.demo.pandanteknik.com/auth/:match*" },
+    { "source": "/api/:match*", "destination": "https://ddag.demo.pandanteknik.com/api/:match*" },
+    { "source": "/oauth/:match*", "destination": "https://ddag.demo.pandanteknik.com/oauth/:match*" },
+    { "source": "/.well-known/:match*", "destination": "https://ddag.demo.pandanteknik.com/.well-known/:match*" },
+    { "source": "/readyz", "destination": "https://ddag.demo.pandanteknik.com/readyz" },
+    { "source": "/healthz", "destination": "https://ddag.demo.pandanteknik.com/healthz" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

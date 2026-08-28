@@ -48,3 +48,5 @@ apps/dashboard/dist/
 # Local binary backups (from deploy scripts)
 /backups/
 var/
+.vercel
+.env*
