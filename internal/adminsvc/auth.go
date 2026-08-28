@@ -63,13 +63,17 @@ func (s *service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorCode(w, r, httpx.CodeInternal, "failed to create csrf token")
 		return
 	}
+	sameSite := http.SameSiteLaxMode
+	if s.cfg.Session.CookieSecure {
+		sameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     s.cfg.Session.CookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   s.cfg.Session.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		Expires:  exp,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -78,7 +82,7 @@ func (s *service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: false,
 		Secure:   s.cfg.Session.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		Expires:  exp,
 	})
 	s.audit.Write(r.Context(), r, audit.Event{
@@ -98,13 +102,17 @@ func (s *service) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout clears the session cookie.
 func (s *service) handleLogout(w http.ResponseWriter, r *http.Request) {
+	sameSite := http.SameSiteLaxMode
+	if s.cfg.Session.CookieSecure {
+		sameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name: s.cfg.Session.CookieName, Value: "", Path: "/", HttpOnly: true,
-		Secure: s.cfg.Session.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+		Secure: s.cfg.Session.CookieSecure, SameSite: sameSite, MaxAge: -1,
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name: "ddag_csrf", Value: "", Path: "/", HttpOnly: false,
-		Secure: s.cfg.Session.CookieSecure, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+		Secure: s.cfg.Session.CookieSecure, SameSite: sameSite, MaxAge: -1,
 	})
 	if p := principalOf(r); p != nil {
 		s.audit.Write(r.Context(), r, audit.Event{
