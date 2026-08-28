@@ -1,0 +1,12 @@
+{
+  "cleanUrls": true,
+  "buildCommand": "cd apps/dashboard && pnpm install && pnpm build",
+  "outputDirectory": "apps/dashboard/dist",
+  "rewrites": [
+    { "source": "/auth/(.*)", "destination": "https://ddag.demo.pandanteknik.com/auth/$1" },
+    { "source": "/api/(.*)", "destination": "https://ddag.demo.pandanteknik.com/api/$1" },
+    { "source": "/oauth/(.*)", "destination": "https://ddag.demo.pandanteknik.com/oauth/$1" },
+    { "source": "/.well-known/(.*)", "destination": "https://ddag.demo.pandanteknik.com/.well-known/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
