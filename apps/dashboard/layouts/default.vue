@@ -20,6 +20,8 @@ watch(() => route.path, () => { mobileNavOpen.value = false })
 interface NavItem { to: string; label: string; icon: string; perms?: string[]; external?: boolean }
 interface NavGroup { title: string; items: NavItem[] }
 
+const docsUrl = import.meta.env.VITE_API_BASE ? `${import.meta.env.VITE_API_BASE}/docs` : '/docs'
+
 const groups: NavGroup[] = [
   { title: 'Main', items: [{ to: '/', label: 'Overview', icon: 'overview' }] },
   {
@@ -49,7 +51,7 @@ const groups: NavGroup[] = [
     ],
   },
   { title: 'System', items: [{ to: '/settings', label: 'Settings', icon: 'settings' }] },
-  { title: 'Developers', items: [{ to: '/docs', label: 'OpenAPI Docs', icon: 'terminal', external: true }] },
+  { title: 'Developers', items: [{ to: docsUrl, label: 'OpenAPI Docs', icon: 'terminal', external: true }] },
 ]
 
 const visibleGroups = computed(() =>
