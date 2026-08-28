@@ -264,6 +264,11 @@ func seedDemoClient(ctx context.Context, pool *pgxpool.Pool, apiIDs []uuid.UUID,
 			return err
 		}
 	}
+	// IP whitelist for the demo environment.
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO ip_whitelists (ip_cidr, scope_level, status, description)
+		VALUES ('0.0.0.0/0', 'global', 'active', 'Allow all IPv4'), ('::/0', 'global', 'active', 'Allow all IPv6')
+		ON CONFLICT DO NOTHING`)
 	return nil
 }
 
